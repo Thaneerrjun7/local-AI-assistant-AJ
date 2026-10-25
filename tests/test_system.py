@@ -15,19 +15,19 @@ from pathlib import Path
 from unittest import mock
 
 try:
-    import ultron.tools.intents as intents
-    import ultron.tools.system as system
-    from ultron.core.power import PowerState
-    from ultron.tools.registry import ToolError
+    import aj.tools.intents as intents
+    import aj.tools.system as system
+    from aj.core.power import PowerState
+    from aj.tools.registry import ToolError
 except ModuleNotFoundError as e:  # the tool registry is written in a parallel change
-    if e.name not in ("ultron.tools.registry", "ultron.tools.intents"):
+    if e.name not in ("aj.tools.registry", "aj.tools.intents"):
         raise
     system = None
 
 
 def setUpModule():
     if system is None:
-        raise unittest.SkipTest("ultron.tools.registry isn't there yet")
+        raise unittest.SkipTest("aj.tools.registry isn't there yet")
 
 
 UP, DOWN = {"change": "up"}, {"change": "down"}
@@ -37,7 +37,7 @@ SAID = {
     "volume 30": ("set_volume", {"level": 30}),
     "Set volume to 30 percent.": ("set_volume", {"level": 30}),
     "set the volume to 30%": ("set_volume", {"level": 30}),
-    "Hey Ultron, volume at fifty-five": ("set_volume", {"level": 55}),
+    "Hey Computer, volume at fifty-five": ("set_volume", {"level": 55}),
     "turn the volume up to 80": ("set_volume", {"level": 80}),
     "max volume": ("set_volume", {"level": 100}),
     "Turn it up": ("set_volume", UP),
@@ -88,12 +88,39 @@ SAID = {
     "How much battery do I have left?": ("battery_status", {}),
     "what's my battery at": ("battery_status", {}),
     "am I plugged in": ("battery_status", {}),
+    "How much charge does the laptop have?": ("battery_status", {}),  # both missed live, 2026-10-18
+    "What is the battery status of the laptop?": ("battery_status", {}),
+    # "battery" as speech-to-text wrote it for the boss: these went to the model live (2026-10-22),
+    # which read out the RAM for the first one.
+    "How much better percentages there left?": ("battery_status", {}),
+    "my battery presentation right now.": ("battery_status", {}),
+    "No, I'm talking about battery percentage.": ("battery_status", {}),
+    "How much battery percentage is left?": ("battery_status", {}),
+    "What's my battery at right now?": ("battery_status", {}),
+    "Battery's percentage?": ("battery_status", {}),
+    "How much batteries left?": ("battery_status", {}),
+    "How many % battery left?": ("battery_status", {}),
+    "How much is my battery?": ("battery_status", {}),
+    "What percentage is my battery at?": ("battery_status", {}),
+    "What's my better percentage?": ("battery_status", {}),
+    "Better percentage.": ("battery_status", {}),
+    "how much better do I have left": ("battery_status", {}),
+    "How much batter is remaining?": ("battery_status", {}),
+    "what's my better level": ("battery_status", {}),
+    "How much better charge is there?": ("battery_status", {}),
+    "I'm asking about the battery.": ("battery_status", {}),
 }
 
 NOT_MINE = ["play despacito", "what does mute mean", "turn off the lights", "volume", "brightness",
             "open spotify", "set a timer for 30 minutes", "time to go", "next", "stop",
             "skip to the end", "whats the time in london", "turn up the heat", "dim sum near me",
-            "take a picture of my cat", "what is the volume of a cube", "volume banana"]
+            "take a picture of my cat", "what is the volume of a cube", "volume banana",
+            # "better" is a real word: only a battery word next to it makes it the battery
+            "which is better", "I feel better.", "better than that", "Is my laptop better?", "How much better is it?",
+            "how much better is my laptop than yours", "better", "is it getting better", "a better life",
+            "You better charge it.", "How much batter do I need?", "What's better, tea or coffee?", "I meant better.",
+            "Which has a better percentage?", "better presentation", "make my presentation better",
+            "how much better do I have to be", "the battery of tests"]
 
 
 class IntentTests(unittest.TestCase):

@@ -1,9 +1,9 @@
-"""Memory learning waits until Ultron is idle, so it never competes with a reply for the GPU."""
+"""Memory learning waits until AJ is idle, so it never competes with a reply for the GPU."""
 import time
 import unittest
 from unittest import mock
 
-from ultron import engine
+from aj import engine
 
 
 class MemoryHookTests(unittest.TestCase):

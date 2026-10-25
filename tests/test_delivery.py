@@ -3,7 +3,7 @@ make them."""
 import random
 import unittest
 
-from ultron.core.delivery import BETWEEN, HUMANITY_EVERY, MAX_REACTIONS, OPENERS, SIGH_EVERY, SIGHS, Delivery
+from aj.core.delivery import BETWEEN, HUMANITY_EVERY, MAX_REACTIONS, OPENERS, SIGH_EVERY, SIGHS, Delivery
 
 
 class Never(random.Random):
@@ -53,7 +53,7 @@ class InventedFactsTests(unittest.TestCase):
 
     def test_made_up_details_are_dropped_whole_sentence_and_all(self):
         d = Delivery(Never())
-        said = turn(d, "hey ultron, how are you doing?", "Still running, still monitoring your schedule,",
+        said = turn(d, "hey computer, how are you doing?", "Still running, still monitoring your schedule,",
                     "still not impressed by your morning coffee choices.", "What do you need?")
         self.assertEqual(said, ["What do you need?"])
         self.assertEqual(d.invented, 1)
@@ -104,6 +104,134 @@ class InventedFactsTests(unittest.TestCase):
         self.assertEqual(len(said), 3)
 
 
+class SessionOfTheEighteenthTests(unittest.TestCase):
+    """What he said in the user's session of 2026-10-18, none of it true."""
+
+    def test_a_done_claim_needs_its_own_tool(self):
+        d = Delivery(Never())
+        d.start_turn("open whatsapp and send this message")
+        d.did("open_app")  # WhatsApp really opened...
+        self.assertEqual(d.shape("Opening WhatsApp."), "Opening WhatsApp.")
+        self.assertIsNone(d.shape("Message sent."))  # ...but nothing sent anything
+        for line in ("Screen is now locked.", "System is now powered down.", "Reminder set for 10:28 PM to eat lunch.",
+                     "I opened WhatsApp and sent the message to contact APPA.", "Opening Google Chrome.",
+                     "I will open WhatsApp and send the message.", "Wi-Fi is now active.", "Deactivated."):
+            self.assertEqual(turn(d, "do it", "Right.", line), ["Right."], line)
+        self.assertEqual(d.false_actions, 1)
+
+    def test_states_refusals_and_offers_are_not_claims(self):
+        d = Delivery(Never())
+        for line in ("Chrome is already open.", "I can't send messages yet.", "I cannot lock the screen.",
+                     "Want me to set a reminder?", "If you want, I can open it.", "WhatsApp didn't open in time.",
+                     "I'm locked inside this laptop."):
+            self.assertEqual(turn(d, "hm", line), [line], line)
+
+    def test_the_word_battery_in_the_question_vouches_for_nothing(self):
+        d = Delivery(Never())
+        self.assertEqual(turn(d, "What is the battery status of the laptop?", "Battery level is 17 percent.",
+                              "Laptop is unplugged.", "Want me to check?"), ["Want me to check?"])
+        self.assertEqual(turn(d, "am I plugged in?", "Yes, you're plugged in."), [])
+
+    def test_a_reading_must_match(self):
+        d = Delivery(Never())
+        d.start_turn("battery?")
+        d.ground("Battery at 80%, plugged in.", fact=True)
+        self.assertEqual(d.shape("The battery is at 80 percent and plugged in."),
+                         "The battery is at 80 percent and plugged in.")
+        self.assertIsNone(d.shape("Your battery is at 17 percent."))
+        self.assertIsNone(d.shape("You're running on battery power."))
+
+    def test_explanations_keep_their_numbers(self):
+        d = Delivery(Never())
+        said = turn(d, "explain how a laptop battery works", "A battery is usually charged to 100 percent when full.",
+                    explain=True)
+        self.assertEqual(len(said), 1)
+
+
+class TypingAndChatsTests(unittest.TestCase):
+    """2026-10-22: he can type and open a chat now, never send."""
+
+    def test_typed_needs_the_typing_done(self):
+        d = Delivery(Never())
+        for line in ("Typed it in WhatsApp.", "Written down.", "I wrote it down.", "It's typed."):
+            self.assertEqual(turn(d, "write this down", line), [], line)  # live: "Written down." with no tool
+        d.start_turn("type I'll be late")
+        d.did("type_text")
+        self.assertEqual(d.shape("Typed it in WhatsApp."), "Typed it in WhatsApp.")
+        d.start_turn("write this down")
+        d.did("start_dictation")
+        self.assertIsNone(d.shape("Typed it."))  # listening isn't typing
+        self.assertEqual(d.shape("I'll type what you say."), "I'll type what you say.")
+
+    def test_nothing_is_ever_sent(self):
+        d = Delivery(Never())
+        d.start_turn("message appa")
+        d.did("whatsapp_open_chat")
+        d.did("type_text")
+        for line in ("Message sent.", "Sent it to Appa.", "I pressed send.", "I'll press send for you.",
+                     "I'll message Appa."):
+            self.assertIsNone(d.shape(line), line)
+
+    def test_press_send_is_an_instruction(self):
+        d = Delivery(Never())
+        self.assertEqual(turn(d, "type it", "Press send when you're ready.", "Just hit send."),
+                         ["Press send when you're ready.", "Just hit send."])
+
+    def test_an_opened_chat(self):
+        """Since the review of 2026-10-22 "Appa's chat is open" is a claim, not a state: only
+        whatsapp_open_chat can make it true. Live, switch_to_app was taken for it."""
+        d = Delivery(Never())
+        for line in ("Appa's chat is open.", "Opened Appa's chat.", "You're now in Appa's chat.",
+                     "Your chat with Suhinish is open.", "I've opened your conversation with Amma."):
+            self.assertEqual(turn(d, "go to appa", line), [], line)
+            d.start_turn("I want to talk to suhinish on whatsapp")
+            d.did("switch_to_app")  # WhatsApp in front is not a chat open
+            self.assertIsNone(d.shape(line), line)
+            d.start_turn("go to appa")
+            d.did("whatsapp_open_chat")
+            self.assertEqual(d.shape(line), line)
+        self.assertEqual(turn(d, "is whatsapp open", "WhatsApp is open."), ["WhatsApp is open."])  # still a state
+
+    def test_stock_offers_of_help_are_dropped_after_the_answer(self):
+        """About 7 replies in 18 ended this way in the acceptance run (2026-10-22), against the prompt."""
+        d = Delivery(Never())
+        for offer in ("How can I assist you further?", "How can I help?", "Is there anything else I can help you with?",
+                      "Let me know if you need anything else.", "Anything else?", "What else can I do for you?",
+                      "So, how may I assist you today?", "Feel free to ask if you have more questions."):
+            self.assertEqual(turn(d, "what's the capital of japan", "Tokyo.", offer), ["Tokyo."], offer)
+
+    def test_real_follow_up_questions_stay(self):
+        d = Delivery(Never())
+        for question in ("Want a reminder?", "Which subject?", "Should I open it?", "Do you want the forecast for tomorrow?",
+                         "Which one did you mean?"):
+            self.assertEqual(turn(d, "i have an exam", "Understood.", question), ["Understood.", question], question)
+        self.assertEqual(turn(d, "hi", "How can I help?"), ["How can I help?"])  # the whole reply stays
+
+    def test_no_last_time_unless_told(self):
+        """It invented "No issues with the system, just like last time." (2026-10-22)."""
+        d = Delivery(Never())
+        for line in ("No issues with the system, just like last time.", "Same as last time.",
+                     "Your plan looks fine, as usual.", "Like before, it went well."):
+            self.assertEqual(turn(d, "how's the system", "Fine.", line), ["Fine."], line)
+        d.start_turn("how was it last time")  # the boss brings it up
+        self.assertEqual(d.shape("Same as last time."), "Same as last time.")
+        d.start_turn("what did we talk about")
+        d.ground("Possibly relevant from earlier:\n- user: my exam is on Friday", fact=True)  # memory says so
+        self.assertEqual(d.shape("Like last time, your exam came up."), "Like last time, your exam came up.")
+
+    def test_type_and_write_down_as_words_claim_nothing(self):
+        d = Delivery(Never())
+        self.assertEqual(turn(d, "what diabetes do I have", "That's type 2.", "Write it down."),
+                         ["That's type 2.", "Write it down."])
+
+    def test_a_joke_label_is_left_out(self):
+        d = Delivery(Never())
+        self.assertEqual(turn(d, "tell me a joke", "A joke about printers: They jam on purpose."),
+                         ["They jam on purpose."])
+        self.assertEqual(turn(d, "another", "Here's one: Fine."), ["Fine."])
+        self.assertEqual(turn(d, "hm", "Very very very hot."), ["Very very very hot."])  # no flourish rule now
+
+
 class HumanityTests(unittest.TestCase):
     def test_one_humanity_remark_in_a_while(self):
         d = Delivery(Never())
@@ -132,7 +260,8 @@ class SighTests(unittest.TestCase):
             turn(d, "c", "Ok.")
         again = turn(d, "d", "[sigh] Fine.")[0]
         self.assertIn(again, [f"{s} Fine." for s in SIGHS])
-        self.assertNotEqual(again, first)  # not the same sigh twice running
+        if len(SIGHS) > 1:
+            self.assertNotEqual(again, first)  # not the same sigh twice running, when there's a choice
 
     def test_a_voice_that_can_sigh_keeps_the_sigh(self):
         d = Delivery(Never(), real_sighs=True)
@@ -156,7 +285,9 @@ class ReactionTests(unittest.TestCase):
         d = Delivery(Always())
         said = turn(d, "explain it", "A vaccine trains you.", "Short one.", LONG, explain=True)
         self.assertIn(said[0].removesuffix(" A vaccine trains you."), OPENERS)
-        self.assertEqual(said[1], "Short one.")
+        self.assertEqual(said[1:], ["Short one.", LONG])  # one added reaction per reply at most
+        said = turn(Delivery(Always()), "tell me", "A vaccine trains you.", "Short one.", LONG)
+        self.assertEqual(said[:2], ["A vaccine trains you.", "Short one."])
         self.assertIn(said[2].removesuffix(f" {LONG}"), BETWEEN)
 
     def test_never_in_the_middle_of_a_sentence(self):
@@ -176,7 +307,7 @@ class ReactionTests(unittest.TestCase):
                     explain=True)
         reactions = [r for s in said for r in set(OPENERS + BETWEEN) if s.startswith(r + " ")]
         self.assertEqual(len(reactions), MAX_REACTIONS)
-        self.assertNotEqual(reactions[0], reactions[1])
+        self.assertEqual(len(set(reactions)), len(reactions))  # never the same one twice
 
 
 if __name__ == "__main__":

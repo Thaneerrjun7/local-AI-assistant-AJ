@@ -1,10 +1,10 @@
-"""Make the public copy of Ultron (for GitHub) from this private one.
+"""Make the public copy of AJ (for GitHub) from this private one.
 
 The private repo keeps its full history, and some of what's in it stays private: the owner's
 signature lines (adapted from a film's dialogue), personal paths in the design plan, a one-off
 migration script. The public repo gets a fresh history built from the current files minus those:
 
-    .venv\\Scripts\\python.exe scripts\\export_public.py           # into ..\\Ultron-public
+    .venv\\Scripts\\python.exe scripts\\export_public.py           # into ..\\AJ-public
     .venv\\Scripts\\python.exe scripts\\export_public.py D:\\other  # somewhere else
 
 It stops, with the copy left for inspection, if any copied file still contains the Windows
@@ -21,7 +21,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-PRIVATE = {"docs/PLAN.md", "docs/ULTRON_RESUME_NOTES.md", "scripts/import_sivasafe_memory.py"}
+# FIX_PLAN.md too (2026-10-26, the owner): a working log with contact names and notes about his key.
+PRIVATE = {"docs/PLAN.md", "docs/AJ_RESUME_NOTES.md", "docs/FIX_PLAN.md", "scripts/import_sivasafe_memory.py"}
 
 
 def tracked() -> list[str]:
@@ -43,7 +44,7 @@ def forbidden() -> list[str]:
     return [f.lower() for f in found if f]
 
 
-MARK = Path(".git") / "ultron-public-export"  # inside .git, so it's never published
+MARK = Path(".git") / "aj-public-export"  # inside .git, so it's never published
 
 
 def prepare(target: Path) -> None:
@@ -62,7 +63,7 @@ def prepare(target: Path) -> None:
 
 
 def main() -> int:
-    target = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT.parent / "Ultron-public"
+    target = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT.parent / "AJ-public"
     prepare(target)
     files = tracked()
     for rel in files:

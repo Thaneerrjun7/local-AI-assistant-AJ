@@ -1,4 +1,4 @@
-"""A stand-in for ultron/voice_server.py in tests: same pipe protocol, no model. Each line
+"""A stand-in for aj/voice_server.py in tests: same pipe protocol, no model. Each line
 comes back as 100 samples of 0.5 per character, then a little silence."""
 import json
 import os

@@ -143,7 +143,7 @@ def stream_chat(base: str, body: dict) -> dict:
             "total": total, "text": text, "decode_tps": timings.get("predicted_per_second")}
 
 
-PERSONA = {"system": cases.PERSONA_V0, "reminder": cases.REMINDER}  # --persona app swaps in Ultron's live one
+PERSONA = {"system": cases.PERSONA_V0, "reminder": cases.REMINDER}  # --persona app swaps in AJ's live one
 
 
 def system_msgs(user: str, history: list | None = None) -> list:
@@ -366,13 +366,13 @@ def main():
     ap.add_argument("--out-dir", type=Path, default=ROOT / "data" / "bench")
     ap.add_argument("--think", action="store_true", help="hard section: let thinking models reason first")
     ap.add_argument("--persona", choices=["v0", "app"], default="v0",
-                    help="v0 = the fixed benchmark draft; app = ultron/persona.py as it is now")
+                    help="v0 = the fixed benchmark draft; app = aj/persona.py as it is now")
     ap.add_argument("--extra", nargs=argparse.REMAINDER, default=[], help="extra llama-server args (last)")
     args = ap.parse_args()
     if args.persona == "app":
         sys.path.insert(0, str(ROOT))
-        from ultron import persona
-        PERSONA.update(system=persona.SYSTEM, reminder=persona.REMINDER)
+        from aj import persona
+        PERSONA.update(system=persona.SYSTEM, reminder="")  # v4: no per-turn reminder
 
     out_dir = args.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)

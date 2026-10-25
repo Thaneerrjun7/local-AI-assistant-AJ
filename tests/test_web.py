@@ -11,11 +11,11 @@ from pathlib import Path
 from unittest import mock
 
 try:
-    from ultron.tools import web
-    from ultron.tools.intents import normalize
-    from ultron.tools.registry import ToolError
+    from aj.tools import web
+    from aj.tools.intents import normalize
+    from aj.tools.registry import ToolError
 except ModuleNotFoundError as exc:  # the tool registry isn't written yet
-    if "ultron.tools.registry" not in str(exc) and "ultron.tools.intents" not in str(exc):
+    if "aj.tools.registry" not in str(exc) and "aj.tools.intents" not in str(exc):
         raise
     raise unittest.SkipTest(f"tool registry not available yet ({exc})")
 
@@ -49,9 +49,13 @@ class WebCase(unittest.TestCase):
     """Every test gets a fake network (fails loudly unless served) and a fake os.startfile."""
 
     def setUp(self) -> None:
-        self.urlopen = self._patch("ultron.tools.web.urllib.request.urlopen",
+        self.urlopen = self._patch("aj.tools.web.urllib.request.urlopen",
                                    side_effect=AssertionError("a test tried to use the real network"))
-        self.startfile = self._patch("ultron.tools.web.os.startfile", create=True)
+        self.startfile = self._patch("aj.tools.web.os.startfile", create=True)
+        # No real window is looked for or brought forward: with a YouTube window open on the
+        # desktop, open_website("youtube") used to focus it during the suite (the review, 2026-10-22).
+        self._patch("aj.tools.apps.list_windows", return_value=[])
+        self._patch("aj.tools.apps._focus", side_effect=AssertionError("a test tried to focus a real window"))
 
     def _patch(self, target: str, **kwargs) -> mock.MagicMock:
         patcher = mock.patch(target, **kwargs)
@@ -191,7 +195,7 @@ class YouTubeTests(WebCase):
 
     def test_offline_still_opens_the_results_page_and_logs_why(self):
         self.fail_network(urllib.error.URLError("offline"))
-        with self.assertLogs("ultron.tools.web", "WARNING") as logs:
+        with self.assertLogs("aj.tools.web", "WARNING") as logs:
             self.assertIn("opened the YouTube results", web.play_youtube("lofi & beats"))
         self.assertIn("offline", logs.output[0])
         self.assertEqual(self.opened(), [self.RESULTS_PAGE])
@@ -257,12 +261,12 @@ class IntentTests(unittest.TestCase):
     def test_commands_it_claims(self):
         for said, expected in [
             ("Search for the best pizza in Bangalore", ("web_search", {"query": "the best pizza in bangalore"})),
-            ("Ultron, look up Python 3.13 release date, please.",
+            ("Computer, look up Python 3.13 release date, please.",
              ("web_search", {"query": "python 3.13 release date"})),
             ("Google how tall is Mount Everest?", ("web_search", {"query": "how tall is mount everest"})),
             ("search the web for cheap flights online", ("web_search", {"query": "cheap flights"})),
             ("Play Bohemian Rhapsody on YouTube", ("play_youtube", {"query": "bohemian rhapsody"})),
-            ("hey ultron play lofi hip hop from youtube now", ("play_youtube", {"query": "lofi hip hop"})),
+            ("hey computer play lofi hip hop from youtube now", ("play_youtube", {"query": "lofi hip hop"})),
             ("Open YouTube.", ("open_website", {"url_or_site": "youtube"})),
             ("open youtube.com", ("open_website", {"url_or_site": "youtube"})),
             ("go to youtube", ("open_website", {"url_or_site": "youtube"})),
@@ -281,6 +285,33 @@ class IntentTests(unittest.TestCase):
         names = {name for _, name, _ in web.INTENTS}
         self.assertLessEqual(names, {"web_search", "open_website", "play_youtube"})
 
+
+class OpenAgainTests(unittest.TestCase):
+    """"Open YouTube" with YouTube already showing in a browser switches to it (2026-10-18)."""
+
+    def windows(self, *titles):
+        from aj.tools.apps import Window
+        return [Window(i, t, frozenset({"chrome.exe"}), frozenset({"chrome"})) for i, t in enumerate(titles, 1)]
+
+    def test_switches_to_the_window_showing_it(self):
+        from aj.tools import apps, web
+        with mock.patch.object(apps, "list_windows", return_value=self.windows("Docs - Google Chrome",
+                                                                              "A video - YouTube - Google Chrome")),                 mock.patch.object(apps, "_focus", return_value=True) as focus,                 mock.patch.object(web, "_open_in_browser") as browser:
+            self.assertEqual(web.open_website("youtube"), "Switching to YouTube.")
+        focus.assert_called_once_with(2)
+        browser.assert_not_called()
+
+    def test_opens_it_when_no_window_shows_it(self):
+        from aj.tools import apps, web
+        with mock.patch.object(apps, "list_windows", return_value=self.windows("Why YouTube is bad - Reddit - Google Chrome")),                 mock.patch.object(web, "_open_in_browser") as browser:
+            self.assertEqual(web.open_website("youtube"), "Opened youtube.com.")
+        browser.assert_called_once_with("https://www.youtube.com")
+
+    def test_an_address_always_opens(self):
+        from aj.tools import apps, web
+        with mock.patch.object(apps, "list_windows") as windows, mock.patch.object(web, "_open_in_browser"):
+            web.open_website("example.com")
+        windows.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main()

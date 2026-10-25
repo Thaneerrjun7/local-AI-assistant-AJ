@@ -20,8 +20,8 @@ from email.message import Message
 from pathlib import Path
 from unittest import mock
 
-from ultron.tools import dispatch, intents, registry, system, weather
-from ultron.tools.registry import Level, ToolError
+from aj.tools import dispatch, intents, registry, system, weather
+from aj.tools.registry import Level, ToolError
 
 FIXTURES = Path(__file__).parent / "fixtures" / "weather"
 CAPTURED = datetime(2026, 10, 4, 12, 15, tzinfo=timezone.utc).timestamp()  # 08:15 in Toronto
@@ -432,7 +432,7 @@ class ToolSpecTests(unittest.TestCase):
 SAID = {
     "what's the weather": {"day": "today"},
     "What's the weather like?": {"day": "today"},
-    "Hey Ultron, how's the weather": {"day": "today"},
+    "Hey Computer, how's the weather": {"day": "today"},
     "weather in toronto tomorrow": {"day": "tomorrow", "location": "toronto"},
     "Weather in Toronto tomorrow?": {"day": "tomorrow", "location": "toronto"},
     "what's the weather in paris texas": {"day": "today", "location": "paris texas"},

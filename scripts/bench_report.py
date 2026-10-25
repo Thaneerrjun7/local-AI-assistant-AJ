@@ -43,7 +43,7 @@ def blind_sheet(results: dict[str, dict], contenders: list[str]) -> None:
         key_path.write_text(json.dumps({"labels": labels}, indent=2), encoding="utf-8")
         ratings.unlink(missing_ok=True)  # old ratings belong to an old line-up
     lines = ["# Blind persona sheet", "",
-             "Score each label 1-10 for how Ultron it sounds (wit, attitude, staying in character, "
+             "Score each label 1-10 for how in character it sounds (wit, attitude, staying in character, "
              "still loyal), then write the scores into persona_ratings.json.", ""]
     first = results[named[0]]["persona"]
     for i, item in enumerate(first["replies"] + first["drift"]):

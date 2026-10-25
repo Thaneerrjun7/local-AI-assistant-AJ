@@ -6,8 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
-from ultron.tools import intents, reminders
-from ultron.tools.registry import ToolError
+from aj.tools import intents, reminders
+from aj.tools.registry import ToolError
 
 NOW = datetime(2026, 10, 6, 12, 0)  # a Tuesday, noon
 

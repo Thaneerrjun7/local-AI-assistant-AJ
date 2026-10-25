@@ -1,4 +1,4 @@
-"""The window itself, offscreen: Close (or the title-bar X) turns Ultron off and the window
+"""The window itself, offscreen: Close (or the title-bar X) turns AJ off and the window
 waits for the engine before it really closes; the mic button and the text box reach the
 engine; engine reports cross from another thread into the window. Uses a fake engine and
 Qt's offscreen platform, so nothing appears on screen and no model loads."""
@@ -16,10 +16,10 @@ except ImportError:  # pragma: no cover - the window is optional for the console
     QApplication = None
 
 if QApplication is not None:
-    from ultron.core.pipeline import Status, TurnTimes
-    from ultron.ui.app import connect
-    from ultron.ui.bridge import Bridge
-    from ultron.ui.window import UltronWindow
+    from aj.core.pipeline import Status, TurnTimes
+    from aj.ui.app import connect
+    from aj.ui.bridge import Bridge
+    from aj.ui.window import AJWindow
 
 
 class FakeControls:
@@ -44,7 +44,7 @@ class WindowTests(unittest.TestCase):
 
     def setUp(self):
         self.engine = FakeControls()
-        self.window = UltronWindow(self.engine)
+        self.window = AJWindow(self.engine)
         self.closing: list[bool] = []
         self.window.closing.connect(self.closing.append)
         self.window.show()
@@ -79,7 +79,7 @@ class WindowTests(unittest.TestCase):
         self.window.mic.click()
         self.assertEqual(self.engine.calls[-1], ("set_listening", True))
 
-    def test_close_turns_ultron_off_and_waits_for_the_engine(self):
+    def test_close_turns_aj_off_and_waits_for_the_engine(self):
         self.window.set_status(Status.LISTENING)
         self.window.close_button.click()
         self.assertEqual(self.engine.calls, [("turn_off",)])
@@ -102,7 +102,7 @@ class WindowTests(unittest.TestCase):
 
     def test_spoken_turn_off_closes_the_window_once_the_engine_ends(self):
         self.window.set_status(Status.LISTENING)
-        self.window.set_status(Status.TURNING_OFF)  # "Ultron, turn off": the engine stops itself
+        self.window.set_status(Status.TURNING_OFF)  # "Computer, turn off": the engine stops itself
         self.assertEqual(self.closing, [False])
         self.window.set_status(Status.LISTENING)  # a late report can't revive the controls
         self.assertEqual(self.window.status, Status.TURNING_OFF)
@@ -128,12 +128,21 @@ class WindowTests(unittest.TestCase):
         self.assertEqual(self.engine.calls, [("ask", "what time is it")])
         self.assertEqual(self.window.entry.text(), "   ")  # blank input is left alone, not sent
 
+    def test_a_mic_that_wont_open_brings_the_window_back(self):
+        """Asleep in the tray, nothing else would tell him the mic is dead (the review of 2026-10-22)."""
+        self.window.set_status(Status.LISTENING)
+        self.window.set_status(Status.ASLEEP)
+        self.assertFalse(self.window.isVisible())
+        self.window.set_status(Status.MIC_FAILED)
+        self.assertTrue(self.window.isVisible())
+        self.assertIn("Microphone", self.window.status_label.text())
+
     def test_transcript_shows_text_literally(self):
         self.window.add_heard("<b>open</b> notepad")
         self.window.add_turn("Opening it.", "sound 610 ms")
         text = self.window.transcript.toPlainText()
         self.assertIn("you: <b>open</b> notepad", text)
-        self.assertIn("ultron: Opening it.", text)
+        self.assertIn("aj: Opening it.", text)
         self.assertIn("sound 610 ms", text)
 
     def test_engine_reports_cross_threads_through_the_bridge(self):

@@ -1,10 +1,10 @@
-"""Record the voice clip Ultron's new voice is copied from (Chatterbox Turbo clones a voice
+"""Record the voice clip AJ's new voice is copied from (Chatterbox Turbo clones a voice
 from ~10-15 s of speech). Run it yourself; it uses your mic only while it's recording:
 
-    E:\\Ultron\\.venv\\Scripts\\python.exe E:\\Ultron\\scripts\\record_voice.py
+    E:\\AJ\\.venv\\Scripts\\python.exe E:\\AJ\\scripts\\record_voice.py
 
 How you say it is how he'll say things: the delivery is copied as well as the voice. So read
-it the way you want Ultron to sound (calm, dry, deliberate), in a quiet room, about an arm's
+it the way you want AJ to sound (calm, dry, deliberate), in a quiet room, about an arm's
 length from the mic, with no music or other voices. The clip stays on this laptop
 (data/voice/my_voice.wav). Run it again to replace it; --seconds changes the length.
 """
@@ -42,7 +42,7 @@ def main() -> int:
     ap.add_argument("--seconds", type=float, default=16.0)
     args = ap.parse_args()
 
-    print("Read this aloud, the way you want Ultron to sound:\n")
+    print("Read this aloud, the way you want AJ to sound:\n")
     print(PASSAGE + "\n")
     input("Press Enter when you're ready (recording starts after a 3-second countdown)... ")
     for n in (3, 2, 1):

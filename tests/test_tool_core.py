@@ -15,10 +15,10 @@ from pathlib import Path
 from typing import Literal, Optional
 from unittest import mock
 
-import ultron.tools as tools
-from ultron.tools import intents, registry
-from ultron.tools.dispatch import Dispatcher
-from ultron.tools.registry import Level, ToolError, tool
+import aj.tools as tools
+from aj.tools import intents, registry
+from aj.tools.dispatch import Dispatcher
+from aj.tools.registry import Level, ToolError, tool
 
 CALLS: list[tuple] = []
 RELEASE = threading.Event()  # lets the deliberately slow tool finish once the test is over
@@ -237,7 +237,7 @@ class DispatcherTests(unittest.TestCase):
 
         def broken(question: str) -> bool:
             raise RuntimeError("no microphone")
-        with self.assertLogs("ultron.tools.dispatch", logging.ERROR):
+        with self.assertLogs("aj.tools.dispatch", logging.ERROR):
             r = Dispatcher(broken, self.audit).run("fake_delete", {"path": "a.txt"})
         self.assertEqual(r.outcome, "declined")
         self.assertEqual(CALLS, [])
@@ -256,7 +256,7 @@ class DispatcherTests(unittest.TestCase):
     def test_tool_errors_and_crashes(self):
         user = self.d.run("fake_fails", {"why": "user"})
         self.assertEqual((user, user.outcome), ("There's no app called Spotfy.", "error"))
-        with self.assertLogs("ultron.tools.dispatch", logging.ERROR):
+        with self.assertLogs("aj.tools.dispatch", logging.ERROR):
             crash = self.d.run("fake_fails", {"why": "bug"})
         self.assertEqual(crash.outcome, "crash")
         self.assertIn("RuntimeError: boom", crash)
@@ -281,20 +281,24 @@ class DispatcherTests(unittest.TestCase):
 
 class IntentTests(unittest.TestCase):
     def setUp(self):
-        with self.assertLogs("ultron.tools.intents", logging.WARNING) as logs:
+        with self.assertLogs("aj.tools.intents", logging.WARNING) as logs:
             self.accepted = intents.collect([FAKE_INTENTS])
         self.skipped = logs.output
 
     def test_normalize(self):
         cases = {
-            "Hey Ultron, please open WhatsApp now!": "open whatsapp",
-            "Ultron, can you open Spotify for me, please?": "open spotify",
+            "Hey Computer, please open WhatsApp now!": "open whatsapp",
+            "Computer, can you open Spotify for me, please?": "open spotify",
             "What's the time?": "whats the time",
             "Set volume to 35%.": "set volume to 35",
             "Remind me at 5:30.": "remind me at 5:30",
             "  Brightness   2.5, NOW. ": "brightness 2.5",
             "Open the to-do list": "open the to do list",
-            "hey ultron": "ultron",
+            "hey computer": "computer",
+            "Hey Computer, do me a favor, open settings.": "open settings",  # live, 2026-10-07 and 18
+            "Can you do me a favour and go ahead and open chrome": "open chrome",
+            "Uh, lock the screen.": "lock the screen",  # live, 2026-10-19
+            "You open YouTube.": "open youtube",
             "": "",
         }
         for said, expected in cases.items():
@@ -302,7 +306,7 @@ class IntentTests(unittest.TestCase):
                 self.assertEqual(intents.normalize(said), expected)
 
     def test_match(self):
-        self.assertEqual(intents.match("Hey Ultron, open WhatsApp."), ("fake_open", {"name": "whatsapp"}))
+        self.assertEqual(intents.match("Hey Computer, open WhatsApp."), ("fake_open", {"name": "whatsapp"}))
         self.assertEqual(intents.match("Set the volume to 35 percent please"), ("fake_volume", {"level": "35"}))
 
     def test_whole_transcript_must_match(self):
@@ -312,7 +316,7 @@ class IntentTests(unittest.TestCase):
 
     def test_declining_and_crashing_builders_fall_through(self):
         self.assertEqual(intents.match("Turn it up"), ("fake_volume", {"level": 10, "mode": "up"}))
-        with self.assertLogs("ultron.tools.intents", logging.ERROR):
+        with self.assertLogs("aj.tools.intents", logging.ERROR):
             self.assertEqual(intents.match("crash it please"), ("fake_open", {"name": "fallback"}))
 
     def test_broken_rules_are_skipped_at_collect(self):
@@ -330,7 +334,7 @@ class IntentTests(unittest.TestCase):
         module.INTENTS = [(rf"do thing {i} (?P<name>.+)", "fake_open", lambda m: {"name": m["name"]})
                           for i in range(60)] + FAKE_INTENTS.INTENTS[:2]
         self.assertEqual(intents.collect([module]), 62)
-        said = ["Hey Ultron, open WhatsApp now!", "Ultron, tell me something interesting about octopuses please."]
+        said = ["Hey Computer, open WhatsApp now!", "Computer, tell me something interesting about octopuses please."]
         n = 500
         t0 = time.perf_counter()
         for i in range(n):
@@ -343,13 +347,13 @@ class LoadAllTests(unittest.TestCase):
     def test_missing_and_broken_modules_are_skipped(self):
         with tempfile.TemporaryDirectory() as tmp:
             Path(tmp, "fake_broken.py").write_text(
-                "from ultron.tools.registry import tool\n"
+                "from aj.tools.registry import tool\n"
                 "@tool()\n"
                 "def fake_half_loaded() -> str:\n"
                 '    """Registered before the crash."""\n'
                 "raise RuntimeError('broken on purpose')\n", encoding="utf-8")
             Path(tmp, "fake_good.py").write_text(
-                "from ultron.tools.registry import tool\n"
+                "from aj.tools.registry import tool\n"
                 "@tool()\n"
                 "def fake_good_tool() -> str:\n"
                 '    """Works."""\n'
@@ -357,10 +361,10 @@ class LoadAllTests(unittest.TestCase):
                 "INTENTS = [(r'good', 'fake_good_tool', lambda m: {})]\n", encoding="utf-8")
             with mock.patch.object(tools, "MODULES", ["fake_missing", "fake_broken", "fake_good"]), \
                  mock.patch.object(tools, "__path__", [*tools.__path__, tmp]), \
-                 self.assertLogs("ultron.tools", logging.WARNING) as logs:
+                 self.assertLogs("aj.tools", logging.WARNING) as logs:
                 loaded = tools.load_all()
                 matched = intents.match("good")
-        sys.modules.pop("ultron.tools.fake_good", None)
+        sys.modules.pop("aj.tools.fake_good", None)
         self.assertEqual(loaded, ["fake_good"])
         self.assertEqual(matched, ("fake_good_tool", {}))
         self.assertIsNone(registry.get("fake_half_loaded"))  # fail closed: no half-loaded module
@@ -374,6 +378,57 @@ class LoadAllTests(unittest.TestCase):
         finally:
             logging.disable(logging.NOTSET)
         self.assertTrue(set(loaded) <= set(tools.MODULES))
+
+
+class ReviewFixTests(unittest.TestCase):
+    """The review of 2026-10-22: a tool the dispatcher gave up on is told to stop, and a tool's
+    private arguments (a dictation's words) reach the audit log only as their length."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.audit = Path(self.tmp.name) / "audit.jsonl"
+        self.d = Dispatcher(lambda question: True, self.audit)
+        self.stopped = threading.Event()
+
+        def fake_typing(text: str) -> str:
+            """Type some words."""
+            return "Typed it."
+
+        def fake_waits() -> str:
+            """Wait until told to stop."""
+            if registry.cancel_event().wait(2.0):
+                self.stopped.set()
+            return "late"
+
+        tool(timeout=1.0, private=("text",))(fake_typing)
+        tool(timeout=0.05)(fake_waits)
+        for name in ("fake_typing", "fake_waits"):
+            self.addCleanup(registry.unregister, name)
+
+    def test_a_timed_out_tool_is_told_to_stop(self):
+        result = self.d.run("fake_waits")
+        self.assertEqual(result.outcome, "timeout")
+        self.assertTrue(self.stopped.wait(1.0), "the abandoned tool was never told to stop")
+        self.assertIsNone(registry.cancel_event())  # outside a tool call there is none
+
+    def test_private_arguments_are_kept_as_their_length_only(self):
+        words = "Hi Amma, I'm running late"
+        self.d.run("fake_typing", {"text": words})
+        self.d.run("fake_typing", '{"text": "secret words", "bogus": 1}')  # refused: still hidden
+        self.d.run("fake_typing", '{"text": "unterminated')               # not even JSON
+        raw = self.audit.read_text(encoding="utf-8")
+        for secret in ("Amma", "secret", "unterminated"):
+            self.assertNotIn(secret, raw)
+        lines = [json.loads(line) for line in raw.splitlines()]
+        self.assertEqual(lines[0]["args"], {"text": f"({len(words)} characters)"})
+        self.assertEqual(lines[1]["args"], {"text": "(12 characters)", "bogus": 1})
+        self.assertIn("characters, not shown", lines[2]["args"])
+
+    def test_type_text_declares_its_words_private(self):
+        tools.load_all()
+        self.assertEqual(registry.get("type_text").private, ("text",))
+        self.assertEqual(registry.get("fake_typing").private, ("text",))
 
 
 if __name__ == "__main__":

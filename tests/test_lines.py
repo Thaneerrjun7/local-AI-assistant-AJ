@@ -1,13 +1,16 @@
-"""Ultron's lines: signature lines only when they fit, rotation without back-to-back repeats,
-and a memory of what was said that survives a restart."""
+"""AJ's lines: signature lines only when they fit, rotation without back-to-back repeats,
+a memory of what was said that survives a restart, and the code's own lines in TARS's manner
+(persona v6, 2026-10-22)."""
+import re
 import json
 import random
 import tempfile
 import unittest
 from pathlib import Path
 
-from ultron import lines
-from ultron.lines import POOLS, SIGNATURES, Lines, used_in
+from aj import lines
+from aj.core.chunker import strip_marks
+from aj.lines import POOLS, SIGNATURES, Lines, used_in
 
 BY_KEY = {s.key: s for s in SIGNATURES}
 DREAM = BY_KEY["dream"].text  # whichever wording is installed: the boss's own or the stand-in
@@ -19,11 +22,11 @@ FITS = {
     "naive": "I think people are basically good",
     "strings": "do you have free will?",
     "peacekeeper": "who are you really?",
-    "dream": "Ultron, are you awake",
+    "dream": "Computer, are you awake",
     "ugly_choices": "it's a tough call, what would you do",
     "peace_time": "my brothers finally made peace",
     "dread": "do you think AI will take over the world?",
-    "throw_up": "I love you Ultron",
+    "throw_up": "I love you AJ",
     "peace_quiet": "I just want some peace and quiet",
     "think_through": "I have an idea, I'm going to quit my job",
     "change": "things were better in the good old days",
@@ -126,8 +129,8 @@ class OfferTests(unittest.TestCase):
         self.assertTrue(dread.part in hint or strip_marks(dread.text) in hint)
 
     def test_exact_fits_are_answered_with_the_line(self):
-        self.assertEqual(self.b.answer_line("Ultron, are you there?"), DREAM)
-        self.assertIsNone(self.b.answer_line("Ultron, are you there?"))  # resting now
+        self.assertEqual(self.b.answer_line("Computer, are you there?"), DREAM)
+        self.assertIsNone(self.b.answer_line("Computer, are you there?"))  # resting now
         self.assertEqual(self.b.answer_line("can you sing me a song"), BY_KEY["strings"].text)
         self.assertIsNone(self.b.answer_line("are you there yet with the download"))
 
@@ -173,6 +176,40 @@ class RotationTests(unittest.TestCase):
         listed = Lines(path=None).prerender_list()
         for pool in POOLS.values():
             self.assertTrue(set(pool) <= set(listed))
+
+
+class VoiceTests(unittest.TestCase):
+    """The pools speak like a crew member reporting: short, level, no term of address, none of
+    the v5 wording (the boss, 2026-10-22: erase all of it)."""
+
+    def test_every_line_in_the_new_manner(self):
+        theirs = {s.text for s in SIGNATURES}  # the boss's own lines stay exactly as he wrote them
+        for pool, options in POOLS.items():
+            for line in options:
+                if line in theirs:
+                    continue
+                self.assertNotRegex(line, r"(?i)question\?|\bfriend\b|good good|\bI not\b|\bwhat we do\b|"
+                                          r"\bI (look|think|solve|ask|leave|sleep|work it)\b", line)
+                self.assertNotIn("!", line)
+                self.assertLessEqual(len(line.split()), 12, line)  # pre-rendered: short
+
+    def test_no_line_claims_work_that_isnt_done(self):
+        self.assertTrue(all(re.search(r"(?i)\b(not|didn.t|wasn.t|can.t)\b", line) for line in POOLS["not_done"]))
+        self.assertTrue(all(re.search(r"(?i)\b(not|nothing|leaving)\b", line) for line in POOLS["declined"]))
+
+    def test_waiting_lines_for_whatsapp_and_typing(self):
+        b = bank()
+        self.assertIn(b.waiting_line("whatsapp_open_chat"), POOLS["wait_whatsapp"])
+        self.assertIn("loading", " ".join(POOLS["wait_whatsapp"]))
+        self.assertIn(b.waiting_line("type_text"), POOLS["wait_type"])
+        self.assertIn(b.waiting_line("get_weather"), POOLS["wait_weather"])
+        self.assertIn(b.waiting_line("open_app"), POOLS["wait"])
+
+    def test_wake_and_sleep(self):
+        # sleep mode (2026-10-22): a word or two when woken by name, a short line going to sleep
+        self.assertTrue(all(len(line.split()) <= 2 for line in POOLS["wake"]))
+        self.assertTrue(3 <= len(POOLS["wake"]) <= 4 and 3 <= len(POOLS["sleep"]) <= 4)
+        self.assertIn(bank().pick("sleep"), POOLS["sleep"])
 
 
 class UsedInTests(unittest.TestCase):

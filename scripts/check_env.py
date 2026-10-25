@@ -1,5 +1,5 @@
 """Phase 0 environment probe: Python, power, RAM, GPU, and whether Windows exposes
-per-process GPU counters (needed so the resource guard can ignore Ultron's own load).
+per-process GPU counters (needed so the resource guard can ignore AJ's own load).
 
 Uses only the standard library, so it runs before anything is installed.
 """
@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from ultron.core.power import read_power  # noqa: E402
+from aj.core.power import read_power  # noqa: E402
 
 NO_WINDOW = 0x08000000
 

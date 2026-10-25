@@ -1,5 +1,5 @@
 """The Chatterbox voice: how text is handed to it, the pipe to its process, and that the
-process ends when Ultron is done with it. Uses a fake voice process, not the model."""
+process ends when AJ is done with it. Uses a fake voice process, not the model."""
 import sys
 import tempfile
 import unittest
@@ -9,8 +9,8 @@ from unittest import mock
 
 import numpy as np
 
-from ultron.config import VoiceSettings
-from ultron.core import chatterbox_voice as cv
+from aj.config import VoiceSettings
+from aj.core import chatterbox_voice as cv
 
 FAKE = Path(__file__).with_name("fake_voice_server.py")
 

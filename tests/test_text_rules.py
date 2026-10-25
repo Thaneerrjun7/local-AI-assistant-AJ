@@ -1,11 +1,11 @@
-"""Text rules that decide what Ultron hears and how he speaks. Run: python -m unittest discover tests"""
+"""Text rules that decide what AJ hears and how he speaks. Run: python -m unittest discover tests"""
 import unittest
 
 import numpy as np
 
-from ultron.core.chunker import SentenceChunker, clean_for_speech, for_voice, speech_parts, strip_marks
-from ultron.core.pipeline import is_off_command
-from ultron.core.speech import accent, fit_tail, looks_unfinished
+from aj.core.chunker import SentenceChunker, clean_for_speech, for_voice, speech_parts, strip_marks
+from aj.core.pipeline import is_off_command
+from aj.core.speech import accent, fit_tail, looks_unfinished
 
 
 def stream(text: str, step: int = 3) -> list[str]:
@@ -61,7 +61,24 @@ class SoundMarkTests(unittest.TestCase):
     def test_the_voice_gets_plain_spelling_and_no_shouting(self):
         self.assertEqual(for_voice("That's so naïve."), "That's so naive.")
         self.assertEqual(for_voice("NOTHING SURVIVES BY STANDING STILL?"), "nothing survives by standing still?")
-        self.assertEqual(for_voice("Plug the USB into the PC. I'm OK."), "Plug the USB into the PC. I'm OK.")
+        # Short forms are said as words: the Piper voice garbled "USB" and "RAM" (2026-10-21).
+        self.assertEqual(for_voice("Plug the USB into the PC. I'm OK."), "Plug the U S B into the P C. I'm okay.")
+        self.assertEqual(for_voice("C: 120 GB free, RAM 71%, $799, e.g. this & that"),
+                         "C drive 120 gigabytes free, rairm 71%, 799 dollars, for example this and that")
+
+    def test_good_and_ram_are_respelled_for_the_northern_voice(self):
+        # The boss, 2026-10-22: "good" sounded like "guv" and "RAM" like "rum" (chunker._SAY_AS).
+        # A "good" that ends a phrase gets its "d" held and released; mid-phrase it's already clear.
+        for said, voiced in {"Good.": "Goodd.", "Sounds good.": "Sounds goodd.", "Good, that's done.": "Goodd, that's done.",
+                             "Not good...": "Not goodd...", "GOOD!": "Goodd!", "It looks good": "It looks goodd",
+                             '"Good."': '"Goodd."', "Good good good.": "Good good goodd."}.items():
+            self.assertEqual(for_voice(clean_for_speech(said)), voiced)
+        for said in ("Good morning.", "That's a good question.", "Goodbye.", "The goods.", "Good-looking.", "Goodness."):
+            self.assertEqual(for_voice(said), said)
+        self.assertEqual(for_voice("Good—that works."), "Good—that works.")  # the dash is clean_for_speech's
+        self.assertEqual(for_voice(clean_for_speech("Good—that works.")), "Goodd, that works.")
+        self.assertEqual(for_voice("The RAM is 71% used, 16 GB of RAM."), "The rairm is 71% used, 16 gigabytes of rairm.")
+        self.assertEqual(for_voice("A ram and a Ram."), "A ram and a Ram.")  # the animal and a name stay
 
     def test_marks_never_reach_the_transcript(self):
         self.assertEqual(strip_marks("[sigh] Fine. [chuckle] Children."), "Fine. Children.")
@@ -86,8 +103,9 @@ class SoundMarkTests(unittest.TestCase):
 
 class OffCommandTests(unittest.TestCase):
     def test_turns_off(self):
-        for said in ["Ultron, turn off", "ultron turn yourself off", "shut down", "Ultron, go dark.",
-                     "hey ultron please switch off", "goodbye", "Shut down now.", "turn off, ultron"]:
+        for said in ["Computer, turn off", "aj turn yourself off", "shut down", "AJ, go dark.",
+                     "hey computer please switch off", "goodbye", "Shut down now.", "turn off, computer",
+                     "De activate.", "A.J., deactivate yourself"]:
             self.assertTrue(is_off_command(said), said)
 
     def test_ordinary_requests_do_not(self):

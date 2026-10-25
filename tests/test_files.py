@@ -18,11 +18,11 @@ from pathlib import Path
 from unittest import mock
 
 try:
-    import ultron.tools.intents as intents
-    from ultron.tools import files, registry
-    from ultron.tools.registry import Level, ToolError
+    import aj.tools.intents as intents
+    from aj.tools import files, registry
+    from aj.tools.registry import Level, ToolError
 except ModuleNotFoundError as e:  # the tool registry isn't there yet
-    if e.name not in ("ultron.tools.registry", "ultron.tools.intents"):
+    if e.name not in ("aj.tools.registry", "aj.tools.intents"):
         raise
     files = None
 
@@ -32,7 +32,7 @@ MAIN = ("Desktop", "Documents", "Downloads", "Pictures", "Music", "Videos")
 
 def setUpModule():
     if files is None:
-        raise unittest.SkipTest("ultron.tools.registry isn't there yet")
+        raise unittest.SkipTest("aj.tools.registry isn't there yet")
 
 
 class FilesCase(unittest.TestCase):
@@ -43,13 +43,13 @@ class FilesCase(unittest.TestCase):
         for name in MAIN:
             (self.home / name).mkdir()
         self.bin = self._tempdir()
-        self._patch("ultron.tools.files.HOME", self.home)
-        self.shell_folder = self._patch("ultron.tools.files._shell_folder", return_value=None)
-        self.startfile = self._patch("ultron.tools.files.os.startfile", create=True)
-        self.shfileop = self._patch("ultron.tools.files._SHFileOperationW",
+        self._patch("aj.tools.files.HOME", self.home)
+        self.shell_folder = self._patch("aj.tools.files._shell_folder", return_value=None)
+        self.startfile = self._patch("aj.tools.files.os.startfile", create=True)
+        self.shfileop = self._patch("aj.tools.files._SHFileOperationW",
                                     side_effect=AssertionError("a test reached the real Recycle Bin"))
-        self._patch("ultron.tools.files._last", [])
-        self._patch("ultron.tools.files._undo", [])
+        self._patch("aj.tools.files._last", [])
+        self._patch("aj.tools.files._undo", [])
         self.recycled: list[tuple[int, int, str]] = []
 
     def _tempdir(self) -> Path:
@@ -273,15 +273,15 @@ class PathSafetyTests(FilesCase):
         self.refused(lambda: files.delete_file("OneDrive"), "main folders")
         self.assertEqual(self.recycled, [])
 
-    def test_ultrons_own_folder_is_protected(self):
-        own = self.home / "Downloads" / "Ultron"
-        self.make(r"Downloads\Ultron\ultron\engine.py")
+    def test_its_own_folder_is_protected(self):
+        own = self.home / "Downloads" / "AJ"
+        self.make(r"Downloads\AJ\aj\engine.py")
         self.make(r"Downloads\notes.txt")
         self.fake_recycle_bin()
         with mock.patch.object(files, "APP_DIR", own):
-            self.refused(lambda: files.delete_file(r"Downloads\Ultron"), "Ultron's own")
-            self.refused(lambda: files.delete_file(r"Downloads\Ultron\ultron\engine.py"), "Ultron's own")
-            self.refused(lambda: files.move_file(r"Downloads\notes.txt", r"Downloads\Ultron"), "Ultron's own")
+            self.refused(lambda: files.delete_file(r"Downloads\AJ"), "my own")
+            self.refused(lambda: files.delete_file(r"Downloads\AJ\aj\engine.py"), "my own")
+            self.refused(lambda: files.move_file(r"Downloads\notes.txt", r"Downloads\AJ"), "my own")
         self.assertEqual(self.recycled, [])
 
     def test_programs_and_scripts_are_not_opened(self):
@@ -524,7 +524,7 @@ class IntentTests(FilesCase):
         said = {
             "Undo.": ("undo_last", {}),
             "undo that please": ("undo_last", {}),
-            "Ultron, put it back": ("undo_last", {}),
+            "Computer, put it back": ("undo_last", {}),
             "How much space do I have left?": ("disk_space", {}),
             "how much space do i have": ("disk_space", {}),
             "How much free space is left on my laptop?": ("disk_space", {}),

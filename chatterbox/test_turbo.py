@@ -1,5 +1,5 @@
 """Chatterbox Turbo trial (2026-10-06), kept for re-measuring. Runs in Chatterbox's own venv; the
-model files live in E:\\Ultron\\models\\hf so they're easy to remove.
+model files live in E:\\AJ\\models\\hf so they're easy to remove.
 
     .venv\\Scripts\\python.exe test_turbo.py                    # built-in default voice
     .venv\\Scripts\\python.exe test_turbo.py --ref my_voice.wav  # copy the voice in that clip
@@ -17,8 +17,8 @@ import wave
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ULTRON = HERE.parent
-os.environ.setdefault("HF_HOME", str(ULTRON / "models" / "hf"))
+ROOT = HERE.parent
+os.environ.setdefault("HF_HOME", str(ROOT / "models" / "hf"))
 
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
@@ -48,7 +48,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--ref", type=Path, help="voice clip to copy (10-15 s)")
     ap.add_argument("--half", choices=["none", "t3", "all"], default="none")
-    ap.add_argument("--out", type=Path, default=ULTRON / "data" / "chatterbox_turbo_test.wav")
+    ap.add_argument("--out", type=Path, default=ROOT / "data" / "chatterbox_turbo_test.wav")
     args = ap.parse_args()
 
     from huggingface_hub import snapshot_download

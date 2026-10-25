@@ -3,7 +3,7 @@ import time
 import unittest
 from unittest import mock
 
-from ultron.core import escalate, gemini
+from aj.core import escalate, gemini
 
 
 class FakeThinker:

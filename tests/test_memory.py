@@ -2,7 +2,7 @@
 and the fact extractor's defences against invented facts.
 
 Every test uses a database in a temporary folder; the module also points DB_PATH at a temporary
-file, so even an accidental get_db() can never touch the real %APPDATA%\\Ultron\\ultron.db.
+file, so even an accidental get_db() can never touch the real %APPDATA%\\AJ\\aj.db.
 The model is never called: HTTP is mocked.
 Run: python -m unittest discover -s tests -t .
 """
@@ -14,14 +14,15 @@ import threading
 import time
 import unittest
 import urllib.error
+from aj.memory.db import Store, UnsafeDatabase, check_wal
 from datetime import date, timedelta
 from pathlib import Path
 from unittest import mock
 
-from ultron.memory import (Store, backup, context_for, db as dbmod, extract_facts, forget,
+from aj.memory import (Store, backup, context_for, db as dbmod, extract_facts, forget,
                            learn_in_background, log_turn, remember, summarize_session,
                            what_do_you_know)
-from ultron.memory.recall import CORE_BUDGET, ITEM_CHARS, SKIP_RECENT
+from aj.memory.recall import CORE_BUDGET, ITEM_CHARS, SKIP_RECENT
 
 _GUARD = tempfile.TemporaryDirectory()
 _patch = mock.patch.object(dbmod, "DB_PATH", Path(_GUARD.name) / "guard.db")
@@ -56,7 +57,7 @@ def chat(*lines: str) -> list[dict]:
 class TempDb(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
-        self.db = Store(Path(self.tmp.name) / "nested" / "ultron.db")
+        self.db = Store(Path(self.tmp.name) / "nested" / "aj.db")
 
     def tearDown(self) -> None:
         self.db.close()
@@ -151,7 +152,16 @@ class RecallTest(TempDb):
                   {"category": "identity", "key": "name", "value": "Alex"}], self.db)
         text = context_for("hi", self.db)
         self.assertLess(text.index("name: Alex"), text.index("favorite food: ramen"))
-        self.assertLess(text.index("favorite food: ramen"), text.index("shoe size: 10"))
+        # Notes, plans, people and projects come only when the turn is about them (2026-10-19:
+        # a dinner plan in every turn kept being brought up out of nowhere).
+        self.assertNotIn("shoe size", text)
+        self.assertIn("shoe size: 10", context_for("what's my shoe size", self.db))
+
+    def test_a_plan_is_not_in_every_turn(self) -> None:
+        remember([{"category": "plans", "key": "plan_dinner_with_dad", "value": "meet Dad for dinner tonight at 8 PM"}],
+                 self.db)
+        self.assertNotIn("dinner", context_for("open whatsapp", self.db))
+        self.assertIn("dinner", context_for("when is my dinner with dad", self.db))
 
     def test_fact_outside_the_core_block_comes_back_when_relevant(self) -> None:
         remember([{"category": "identity", "key": f"filler_{i}", "value": f"filler value {i}"}
@@ -235,7 +245,7 @@ class BackupTest(TempDb):
             backup(self.db, today=start + timedelta(days=d))
         backup(self.db, today=start + timedelta(days=9))  # same day again just refreshes it
         files = sorted(p.name for p in (self.db.path.parent / "backups").iterdir())
-        self.assertEqual(files, [f"ultron-202601{d:02d}.db" for d in range(4, 11)])
+        self.assertEqual(files, [f"aj-202601{d:02d}.db" for d in range(4, 11)])
         copy = sqlite3.connect(self.db.path.parent / "backups" / files[-1])
         try:
             self.assertEqual(copy.execute("SELECT value FROM facts WHERE key = 'name'").fetchone(),
@@ -245,7 +255,7 @@ class BackupTest(TempDb):
 
 
 class ExtractorTest(TempDb):
-    URLOPEN = "ultron.memory.slot.urllib.request.urlopen"
+    URLOPEN = "aj.memory.slot.urllib.request.urlopen"
 
     def test_no_first_person_means_no_model_call(self) -> None:
         with mock.patch(self.URLOPEN) as urlopen:
@@ -271,7 +281,7 @@ class ExtractorTest(TempDb):
     def test_real_fact_is_kept_and_request_uses_slot_1_with_grammar(self) -> None:
         reply = {"facts": [{"quote": "I just moved to Toronto", "category": "identity",
                             "key": "City", "value": "Toronto"}]}
-        turns = chat("I just moved to Toronto. [Stay Ultron: answer only what was asked.]", "Cold choice.")
+        turns = chat("I just moved to Toronto. [Stay AJ: answer only what was asked.]", "Cold choice.")
         with mock.patch(self.URLOPEN, return_value=fake_reply(json.dumps(reply))) as urlopen:
             facts = extract_facts("http://x", turns)
         self.assertEqual(facts, [{"category": "identity", "key": "city", "value": "Toronto"}])
@@ -280,11 +290,11 @@ class ExtractorTest(TempDb):
         self.assertEqual(body["temperature"], 0)
         self.assertEqual(body["response_format"]["type"], "json_schema")
         self.assertIs(body["chat_template_kwargs"]["enable_thinking"], False)
-        self.assertNotIn("Stay Ultron", body["messages"][-1]["content"])
+        self.assertNotIn("Stay AJ", body["messages"][-1]["content"])
 
     def test_server_down_returns_empty(self) -> None:
         with mock.patch(self.URLOPEN, side_effect=urllib.error.URLError("refused")), \
-                self.assertLogs("ultron.memory.extractor", "WARNING"):
+                self.assertLogs("aj.memory.extractor", "WARNING"):
             self.assertEqual(extract_facts("http://x", chat("My sister is Maya", "Noted.")), [])
 
     def test_learn_in_background_saves(self) -> None:
@@ -312,6 +322,66 @@ class SessionTest(TempDb):
             self.assertEqual(summarize_session("http://x", "s1", self.db), summary)
         self.assertEqual(json.loads(urlopen.call_args[0][0].data)["id_slot"], 1)
         self.assertIn(summary, context_for("when is my chemistry exam", self.db))
+
+
+class StrayWalTests(unittest.TestCase):
+    """The review of 2026-10-22: a stray aj.db-wal holding a brand-new database (one turn) sat next
+    to the real aj.db. SQLite would have replayed it over the real one. Store refuses instead,
+    and never deletes anything."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.base = Path(self.tmp.name)
+
+    def crashed(self, folder: Path, turns: int) -> Path:
+        """A database whose process ended without closing it: its rows still in the -wal."""
+        folder.mkdir(parents=True, exist_ok=True)
+        store = Store(folder / "aj.db")
+        for i in range(turns):
+            log_turn("s", "user", f"message {i} " + "x" * 300, store)
+        copy = self.base / f"copy-{folder.name}"
+        copy.mkdir()
+        for suffix in ("", "-wal"):
+            source = Path(f"{store.path}{suffix}")
+            if source.exists():
+                (copy / f"aj.db{suffix}").write_bytes(source.read_bytes())
+        store.close()
+        return copy / "aj.db"
+
+    def test_its_own_write_ahead_file_is_used(self):
+        path = self.crashed(self.base / "own", 3)
+        self.assertTrue(Path(f"{path}-wal").exists())
+        self.assertEqual(check_wal(path), "")
+        store = Store(path)
+        self.assertEqual(store.value("SELECT COUNT(*) FROM messages"), 3)
+        store.close()
+
+    def test_a_foreign_write_ahead_file_is_refused_and_left_alone(self):
+        real = self.crashed(self.base / "real", 0)
+        big = Store(real)  # the real one: many messages, checkpointed into the main file
+        for i in range(200):
+            log_turn("old", "user", f"memory {i} " + "y" * 300, big)
+        big.close()
+        stray = self.crashed(self.base / "stray", 1)  # a fresh database with one turn, still in its -wal
+        wal = Path(f"{real}-wal")
+        wal.write_bytes(Path(f"{stray}-wal").read_bytes())
+        before = (real.read_bytes(), wal.read_bytes())
+        self.assertIn("isn't that database's", check_wal(real))
+        with self.assertRaises(UnsafeDatabase):
+            Store(real)
+        self.assertEqual((real.read_bytes(), wal.read_bytes()), before)  # nothing touched, nothing deleted
+
+    def test_a_write_ahead_file_without_its_database_is_refused(self):
+        stray = self.crashed(self.base / "alone", 1)
+        stray.write_bytes(b"")  # an empty main file: SQLite would delete the -wal, or build on it
+        with self.assertRaises(UnsafeDatabase):
+            Store(stray)
+        stray.unlink()
+        with self.assertRaises(UnsafeDatabase):
+            Store(stray)
+        self.assertTrue(Path(f"{stray}-wal").exists())
+        self.assertFalse(stray.exists())  # not created either
 
 
 if __name__ == "__main__":

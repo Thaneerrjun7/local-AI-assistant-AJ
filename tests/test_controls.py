@@ -9,14 +9,14 @@ import time
 import unittest
 from unittest import mock
 
-from ultron import persona
-from ultron.config import Settings
-from ultron.core import brain as brain_mod
-from ultron.core import pipeline
-from ultron.core.brain import Brain
-from ultron.core.pipeline import Session, Status, TurnTimes, pick_status
-from ultron.engine import Engine
-from ultron.ui import status as looks
+from aj import persona
+from aj.config import Settings
+from aj.core import brain as brain_mod
+from aj.core import pipeline
+from aj.core.brain import Brain
+from aj.core.pipeline import Session, Status, TurnTimes, pick_status
+from aj.engine import Engine
+from aj.ui import status as looks
 
 
 def wait_until(condition, timeout: float = 3.0) -> bool:
@@ -152,9 +152,9 @@ class TypedTextTests(unittest.TestCase):
         stop.set()
         thread.join(2)
 
-    def test_typed_off_command_turns_ultron_off(self):
+    def test_typed_off_command_turns_aj_off(self):
         session, _, brain, _, stop, thread = start_session()
-        session.ask("Ultron, turn off")
+        session.ask("Computer, turn off")
         thread.join(3)
         self.assertTrue(stop.is_set())
         self.assertFalse(thread.is_alive())
@@ -198,7 +198,7 @@ class EngineTests(unittest.TestCase):
             return 0.0
 
         engine.load = fake_load
-        with mock.patch("ultron.engine.Mic", return_value=mic), contextlib.redirect_stdout(io.StringIO()):
+        with mock.patch("aj.engine.Mic", return_value=mic), contextlib.redirect_stdout(io.StringIO()):
             thread = threading.Thread(target=engine.run, args=(events,), daemon=True)
             thread.start()
             self.assertTrue(wait_until(lambda: Status.LISTENING in events.statuses))
@@ -216,7 +216,7 @@ class ReminderTests(unittest.TestCase):
     def _reply(self, brain: Brain, text: str) -> list[dict]:
         sent = []
 
-        def fake_stream(base, messages, settings, tools=None, cancel=None):
+        def fake_stream(base, messages, settings, tools=None, cancel=None, **kw):
             sent.append(messages)
             yield "text", "Fine."
 
@@ -224,15 +224,21 @@ class ReminderTests(unittest.TestCase):
             brain.reply(text, None, TurnTimes(stopped_talking=time.perf_counter()))
         return sent[-1]
 
-    def test_length_reminder_follows_the_question_and_the_clock_comes_first(self):
+    def test_the_clock_comes_first_and_history_keeps_just_the_words(self):
         brain = Brain("http://127.0.0.1:1", Settings())
-        for text, reminder in (("why is the sky blue?", persona.EXPLAIN_REMINDER),
-                               ("what's the capital of France?", persona.SHORT_REMINDER)):
+        for text in ("what day is it tomorrow?", "how long until dinner?"):
             sent = self._reply(brain, text)[-1]["content"]
-            self.assertTrue(sent.startswith("[Now: "), sent)  # the real date and time, every turn
-            self.assertTrue(sent.endswith("\n" + text + reminder), sent)
+            self.assertTrue(sent.startswith("[Now: "), sent)  # the real date and time, when it's about time
+            # No per-turn length reminder since persona v4: it stopped the model calling tools.
+            self.assertTrue(sent.endswith("\n" + text), sent)
             # History keeps the turn without the clock: a stale time in old turns would mislead.
-            self.assertEqual(brain.history[-2], {"role": "user", "content": text + reminder})
+            self.assertEqual(brain.history[-2], {"role": "user", "content": text})
+
+    def test_no_clock_when_its_not_about_time(self):
+        # Sent every turn, he volunteered "The time is 2:40 AM" to "okay, relax" (2026-10-19).
+        brain = Brain("http://127.0.0.1:1", Settings())
+        sent = self._reply(brain, "why is the sky blue?")[-1]["content"]
+        self.assertNotIn("[Now: ", sent)
 
     def test_next_turn_resends_the_stored_history_unchanged(self):
         brain = Brain("http://127.0.0.1:1", Settings())
@@ -288,6 +294,69 @@ class LatencySummaryTests(unittest.TestCase):
 
     def test_nothing_happened(self):
         self.assertEqual(TurnTimes(stopped_talking=10.0).summary(), "")
+
+
+class FailingMic(FakeMic):
+    """A mic whose stream won't open for the first `fails` tries (a headset plugged in while
+    asleep, say: PortAudio raises a plain Exception)."""
+
+    def __init__(self, fails: int):
+        super().__init__()
+        self.fails = fails
+
+    def open(self) -> None:
+        self.calls.append("try")
+        if self.fails:
+            self.fails -= 1
+            raise Exception("Error opening InputStream: Invalid device [PaErrorCode -9996]")
+        super().open()
+
+
+class MicFailureTests(unittest.TestCase):
+    """The review of 2026-10-22: an error reopening the mic used to end Session.run silently,
+    leaving a deaf assistant that still held its single-instance lock."""
+
+    def start(self, mic):
+        brain, events, stop = FakeBrain(), Recorder(), threading.Event()
+        session = Session(Settings(), FakeEars(), brain, None, mic, stop, on_turn=events.on_turn,
+                          on_status=events.on_status)
+        thread = threading.Thread(target=session.run, daemon=True)
+        self.addCleanup(lambda: (stop.set(), thread.join(2)))
+        with contextlib.redirect_stdout(io.StringIO()):
+            thread.start()
+            return session, events, stop, thread
+
+    def test_a_few_tries_then_it_opens(self):
+        mic = FailingMic(fails=2)
+        with mock.patch.object(pipeline, "MIC_TRY_WAIT_SECS", 0.01):
+            session, events, stop, thread = self.start(mic)
+            self.assertTrue(wait_until(lambda: mic.is_open))
+        self.assertEqual(mic.calls.count("try"), 3)
+        self.assertNotIn(Status.MIC_FAILED, events.statuses)
+        self.assertTrue(thread.is_alive())
+
+    def test_it_says_so_keeps_running_and_tries_again(self):
+        mic = FailingMic(fails=pipeline.MIC_TRIES + 1)
+        with mock.patch.object(pipeline, "MIC_TRY_WAIT_SECS", 0.01), mock.patch.object(pipeline, "MIC_RETRY_SECS", 0.2):
+            session, events, stop, thread = self.start(mic)
+            self.assertTrue(wait_until(lambda: Status.MIC_FAILED in events.statuses))
+            self.assertTrue(thread.is_alive())  # never ends silently
+            self.assertTrue(wait_until(lambda: mic.is_open))  # the next round works
+            self.assertTrue(wait_until(lambda: events.statuses[-1:] == [Status.LISTENING]))
+        self.assertIn("Microphone", looks.look(Status.MIC_FAILED)[0])
+
+    def test_a_click_on_the_mic_button_tries_again_at_once(self):
+        mic = FailingMic(fails=pipeline.MIC_TRIES)
+        with mock.patch.object(pipeline, "MIC_TRY_WAIT_SECS", 0.01), mock.patch.object(pipeline, "MIC_RETRY_SECS", 60):
+            session, events, stop, thread = self.start(mic)
+            self.assertTrue(wait_until(lambda: Status.MIC_FAILED in events.statuses))
+            session.set_listening(True)
+            self.assertTrue(wait_until(lambda: mic.is_open))
+
+    def test_the_status_shows_whenever_nothing_is_being_answered(self):
+        self.assertEqual(pick_status(False, False, False, False, mic_failed=True), Status.MIC_FAILED)
+        self.assertEqual(pick_status(False, False, False, False, asleep=True, mic_failed=True), Status.MIC_FAILED)
+        self.assertEqual(pick_status(False, True, False, True, mic_failed=True), Status.SPEAKING)
 
 
 if __name__ == "__main__":
