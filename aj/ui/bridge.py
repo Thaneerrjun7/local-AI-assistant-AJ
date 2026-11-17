@@ -23,6 +23,7 @@ class Bridge(QObject):
     show_requested = pyqtSignal()  # the shortcut was clicked while AJ is on
     confirm_requested = pyqtSignal(str)  # a CONFIRM tool needs a yes or no from the user
     confirm_settled = pyqtSignal()       # answered (maybe by voice) or timed out: close the box
+    working = pyqtSignal(str)            # a tool started (its name), or "" when it's done
 
     def __init__(self):
         super().__init__()
@@ -58,3 +59,6 @@ class Bridge(QObject):
 
     def on_turn(self, text: str, reply: str, times: TurnTimes) -> None:
         self.turn.emit(reply, times.summary())  # the full report goes to the log (engine.print_turn)
+
+    def on_working(self, tool: str) -> None:
+        self.working.emit(tool)

@@ -12,8 +12,6 @@ except ImportError:  # pragma: no cover - the window is optional for the console
     QApplication = None
 
 if QApplication is not None:
-    from PyQt6.QtCore import Qt
-
     from aj.core.pipeline import Status
     from aj.ui import tray
     from aj.ui.app import connect
@@ -185,13 +183,15 @@ class SleepingWindowTests(unittest.TestCase):
         original = self.window.show
 
         def show():
-            shown.append(self.window.testAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating))
+            # What QWidget's WA_ShowWithoutActivating sets on its window, which Qt's Windows
+            # plugin reads on show (the window is Qt Quick now, so it sets it itself).
+            shown.append(self.window.view.property("_q_showWithoutActivating"))
             original()
 
         self.window.show = show
         self.status(Status.THINKING)
         self.assertEqual(shown, [True])
-        self.assertFalse(self.window.testAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating))
+        self.assertFalse(self.window.view.property("_q_showWithoutActivating"))
 
     def test_battery_and_mic_off_are_asleep_too(self):
         self.status(Status.ASLEEP_ON_BATTERY)

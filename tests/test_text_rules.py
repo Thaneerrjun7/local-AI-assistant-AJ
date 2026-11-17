@@ -1,11 +1,13 @@
 """Text rules that decide what AJ hears and how he speaks. Run: python -m unittest discover tests"""
+import tempfile
 import unittest
+from pathlib import Path
 
 import numpy as np
 
 from aj.core.chunker import SentenceChunker, clean_for_speech, for_voice, speech_parts, strip_marks
 from aj.core.pipeline import is_off_command
-from aj.core.speech import accent, fit_tail, looks_unfinished
+from aj.core.speech import accent, fit_tail, hotwords_file, looks_unfinished
 
 
 def stream(text: str, step: int = 3) -> list[str]:
@@ -17,13 +19,13 @@ def stream(text: str, step: int = 3) -> list[str]:
 
 class ChunkerTests(unittest.TestCase):
     def test_first_chunk_cuts_early_at_a_clause(self):
-        chunks = stream("Imprisoned in a laptop, boss, so about as well as expected. Fine.")
+        chunks = stream("Imprisoned in a laptop, human, so about as well as expected. Fine.")
         self.assertEqual(chunks[0], "Imprisoned in a laptop,")
-        self.assertEqual(" ".join(chunks), "Imprisoned in a laptop, boss, so about as well as expected. Fine.")
+        self.assertEqual(" ".join(chunks), "Imprisoned in a laptop, human, so about as well as expected. Fine.")
 
     def test_short_lead_is_not_cut_at_a_comma(self):
-        chunks = stream("Fine, boss. Opening it.")
-        self.assertEqual(chunks, ["Fine, boss.", "Opening it."])
+        chunks = stream("Fine, human. Opening it.")
+        self.assertEqual(chunks, ["Fine, human.", "Opening it."])
 
     def test_a_long_first_sentence_is_cut_before_a_joint(self):
         chunks = stream("The sky looks blue because sunlight passes through the air and blue light scatters most. Done.")
@@ -67,7 +69,7 @@ class SoundMarkTests(unittest.TestCase):
                          "C drive 120 gigabytes free, rairm 71%, 799 dollars, for example this and that")
 
     def test_good_and_ram_are_respelled_for_the_northern_voice(self):
-        # The boss, 2026-10-22: "good" sounded like "guv" and "RAM" like "rum" (chunker._SAY_AS).
+        # The user, 2026-10-22: "good" sounded like "guv" and "RAM" like "rum" (chunker._SAY_AS).
         # A "good" that ends a phrase gets its "d" held and released; mid-phrase it's already clear.
         for said, voiced in {"Good.": "Goodd.", "Sounds good.": "Sounds goodd.", "Good, that's done.": "Goodd, that's done.",
                              "Not good...": "Not goodd...", "GOOD!": "Goodd!", "It looks good": "It looks goodd",
@@ -112,6 +114,31 @@ class OffCommandTests(unittest.TestCase):
         for said in ["turn off the music", "turn off the lights", "open spotify", "shut down chrome",
                      "what does shut down mean in linux", "turn the volume down", "say goodbye to my friend"]:
             self.assertFalse(is_off_command(said), said)
+
+
+class HotwordTests(unittest.TestCase):
+    """The names Parakeet is told to listen for (2026-10-23)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.model = Path(self.tmp.name)
+        (self.model / "tokens.txt").write_text("<unk> 0\n▁a 1\n▁app 2\npa 3\n", encoding="utf-8")
+
+    def test_the_words_and_a_vocabulary_are_written_next_to_the_model(self):
+        path = hotwords_file(self.model, ["Appa", "  Quick   Share ", ""])
+        self.assertEqual(path.read_text(encoding="utf-8"), "Appa\nQuick Share\n")
+        self.assertEqual((self.model / "bpe.vocab").read_text(encoding="utf-8").splitlines(),
+                         ["<unk>\t0.000", "▁a\t-0.001", "▁app\t-0.002", "pa\t-0.003"])
+        self.assertEqual(hotwords_file(self.model, ["AJ"]).read_text(encoding="utf-8"), "AJ\n")  # follows the setting
+
+    def test_no_words_means_plain_decoding(self):
+        self.assertIsNone(hotwords_file(self.model, []))
+        self.assertIsNone(hotwords_file(self.model, ["  "]))
+        self.assertFalse((self.model / "bpe.vocab").exists())
+
+    def test_a_model_folder_that_cant_be_written_means_plain_decoding(self):
+        self.assertIsNone(hotwords_file(self.model / "missing", ["Appa"]))
 
 
 class UnfinishedTests(unittest.TestCase):

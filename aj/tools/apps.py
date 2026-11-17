@@ -114,6 +114,7 @@ _COMMON: list[tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]] = [
     (("clock", "alarms"), ("Clock",), ()),
     (("sticky notes",), ("Sticky Notes",), ()),
     (("media player", "windows media player"), ("Media Player",), ()),
+    (("claude", "claude app", "claude ai"), ("Claude",), ("claude.exe",)),
 ]
 _PRERENDER_COUNT = 15
 
@@ -124,7 +125,8 @@ _APOSTROPHES = re.compile(r"['‘’`]")
 _NOT_ALNUM = re.compile(r"[\W_]+")
 _PARENS = re.compile(r"\s*\([^)]*\)")
 _VENDORS = ("microsoft ", "google ", "adobe ", "mozilla ", "windows ")
-_FILLER = re.compile(r"^(?:the|my|a|an)\s+|\s+(?:app|application|program|window)$", re.IGNORECASE)
+# "Bring up the Photos thing" (2026-10-23, the honesty bench: the model searched files for it)
+_FILLER = re.compile(r"^(?:the|my|a|an)\s+|\s+(?:app|application|program|window|thing)$", re.IGNORECASE)
 # Start Menu entries that aren't apps you'd ask for, or that change something when started.
 _JUNK = re.compile(r"\b(?:(?:un)?install\w*|remove|reset|repair|readme|read me|manuals?|documentation|docs"
                    r"|release notes|website|faqs?|what is new|whats new|license|changelog)\b", re.IGNORECASE)
@@ -144,9 +146,15 @@ def _key(text: str) -> str:
 
 
 def _variants(name: str) -> list[str]:
-    """'the steam app' -> ['the steam app', 'steam']: the name as said, then without filler words."""
+    """'the steam app' -> ['the steam app', 'steam']: the name as said, then without filler words.
+    A name said twice counts once: "open word, word" (live, 2026-10-23) -> 'word'."""
     text = " ".join(str(name).split()).strip(" .,!?\"'")
     out = [text]
+    words = _NOT_ALNUM.sub(" ", text.lower()).split()
+    half = len(words) // 2
+    if half and len(words) % 2 == 0 and words[:half] == words[half:]:
+        text = " ".join(words[:half])
+        out.append(text)
     while (shorter := _FILLER.sub("", text).strip()) and shorter != text:
         out.append(shorter)
         text = shorter
@@ -166,6 +174,37 @@ def _derived(name: str) -> list[str]:
 
 def _is_junk(name: str) -> bool:
     return not name.strip() or bool(_JUNK.search(name)) or _key(name) == "aj"
+
+
+# ---- how a name sounds ---------------------------------------------------------------------
+# Speech-to-text writes down what it heard, and live (2026-10-23) it heard "open cloud" for
+# Claude and "open wood" for Word: the user doesn't sound the r in "word", as most English
+# speakers outside America don't. Spelling can't match those, so a name that matches no app is
+# also tried by its sound: consonants only, voiced and voiceless alike (d/t, b/p, g/k, v/f, z/s),
+# an r only before a vowel, and one letter for a leading vowel. It counts only when exactly one
+# installed app sounds that way ("world" is not Word: its l stays).
+
+_DIGRAPHS = (("chr", "kr"), ("tch", "S"), ("dge", "j"), ("tion", "Sn"), ("sh", "S"), ("ch", "S"), ("ph", "f"),
+             ("gh", ""), ("ck", "k"), ("th", "0"), ("wh", "w"), ("qu", "kw"))
+_VOICING = str.maketrans({"c": "k", "q": "k", "x": "ks", "z": "s", "v": "f", "d": "t", "b": "p", "g": "k"})
+_MIN_SOUND = 2          # consonant sounds: "wt" (Word) is enough, "t" isn't
+_SOUND_SPELLING = 0.5   # and a sound-alike must share this much of the spelling (difflib ratio)
+
+
+def sound_of(name: str) -> str:
+    """'Claude' and 'cloud' -> 'klt'; 'Word' and 'wood' -> 'wt'; 'WhatsApp' -> 'wtsp'."""
+    text = _key(name)
+    if not text:
+        return ""
+    for spelled, said in _DIGRAPHS:
+        text = text.replace(spelled, said)
+    text = re.sub(r"c(?=[eiy])", "s", text)
+    text = re.sub(r"g(?=[eiy])", "j", text)
+    text = re.sub(r"r(?![aeiou])", "", text)       # "word" said "wo'd"
+    text = re.sub(r"[wy](?![aeiou])", "", text)    # "window": the last w is part of the vowel
+    text = re.sub(r"(?<!^)h", "", text).translate(_VOICING)
+    lead = "a" if text[:1] in tuple("aeiou") else "y" if text[:1] == "y" else ""  # "YouTube": a y, not a vowel
+    return re.sub(r"(.)\1+", r"\1", lead + re.sub(r"[aeiouy]", "", text[1:] if lead == "y" else text))
 
 
 # ---- reading shortcuts ---------------------------------------------------------------------
@@ -285,6 +324,8 @@ class _Index:
     complete: bool                  # Get-StartApps has been merged in (Store apps are known)
     keys: dict[str, App] = field(default_factory=dict)   # canonical name -> app
     claimed: frozenset[str] = frozenset()                # every app's AppUserModelID, lowercase
+    # first letter + sound_of(a name) -> (the name, its app) for each name that sounds so ("cklt": Claude)
+    sounds: dict[str, tuple[tuple[str, App], ...]] = field(default_factory=dict)
 
 
 def _start_menu_roots() -> list[Path]:
@@ -418,7 +459,12 @@ def _make_index(apps: Iterable[App], complete: bool) -> _Index:
             keys.setdefault(_key(alias), app)
     keys.pop("", None)
     claimed = frozenset(a.aumid.lower() for a in apps if a.aumid)
-    return _Index(apps, complete, keys, claimed)
+    sounds: dict[str, tuple[tuple[str, App], ...]] = {}
+    for key, app in keys.items():
+        sound = sound_of(key)
+        if len(sound) >= _MIN_SOUND:
+            sounds[key[0] + sound] = (*sounds.get(key[0] + sound, ()), (key, app))
+    return _Index(apps, complete, keys, claimed, sounds)
 
 
 def _save_cache(path: Path, apps: Iterable[App], complete: bool) -> None:
@@ -540,52 +586,73 @@ def _after_miss(index: _Index) -> _Index | None:
     return _current if _current is not index else None
 
 
+def popular(index: _Index | None = None, limit: int = _PRERENDER_COUNT) -> list[str]:
+    """The names of the most used apps (_COMMON's order) that are installed here."""
+    index = index or _get_index()
+    names: list[str] = []
+    for _, aliases, _ in _COMMON:
+        app = next((index.keys[k] for k in map(_key, aliases) if k in index.keys), None)
+        if app is not None and app.name not in names:
+            names.append(app.name)
+        if len(names) == limit:
+            break
+    return names
+
+
 def prerender_lines(index: _Index | None = None) -> list[str]:
     """The open_app replies for the most common installed apps, for the voice cache."""
-    index = index or _get_index()
-    lines: list[str] = []
-    for _, names, _ in _COMMON:
-        app = next((index.keys[k] for k in map(_key, names) if k in index.keys), None)
-        if app is not None and (line := f"Opening {app.name}.") not in lines:
-            lines.append(line)
-        if len(lines) == _PRERENDER_COUNT:
-            break
-    return lines
+    return [f"Opening {name}." for name in popular(index)]
 
 
 # ---- finding an app by name ----------------------------------------------------------------
 
-def _lookup(index: _Index, name: str, cutoff: float) -> list[App]:
-    """[the app], [] for nothing, or two or more apps when the name is about as near to each."""
+def _by_sound(index: _Index, key: str) -> list[App]:
+    """The apps a name sounds like. Same first letter, as for spellings ("cloud", Claude; "good"
+    is not Code), a name of two consonants only from 4 letters up ("wood" is Word, "cat" is
+    nothing), and at least half its letters in common with the app's name: "what" sounds like
+    Word but isn't, "court" sounds like Code but isn't (measured on the user's 147 apps)."""
+    sound = sound_of(key)
+    if len(sound) < _MIN_SOUND or len(key) < (4 if len(sound) == _MIN_SOUND else 3):
+        return []
+    found: list[App] = []
+    for name, app in index.sounds.get(key[0] + sound, ()):
+        if app not in found and difflib.SequenceMatcher(None, key, name).ratio() >= _SOUND_SPELLING:
+            found.append(app)
+    return found
+
+
+def _lookup(index: _Index, name: str, cutoff: float, by_sound: bool = True) -> list[App]:
+    """[the app], [] for nothing, or two or more apps when the name is about as near to each.
+    By spelling first; then, with `by_sound`, by how it sounds (sound_of)."""
     variants = _variants(name)
     for variant in variants:
         if app := index.keys.get(_key(variant)):
             return [app]
     key = _key(variants[-1])
-    if len(key) < _MIN_FUZZY:
-        return []
     # Same first letter: a mishearing rarely changes it, and "gmail" must not open Mail.
-    near = [k for k in difflib.get_close_matches(key, list(index.keys), n=4, cutoff=cutoff) if k[0] == key[0]]
+    near = [k for k in difflib.get_close_matches(key, list(index.keys), n=4, cutoff=cutoff) if k[0] == key[0]] \
+        if len(key) >= _MIN_FUZZY else []
     if not near:
-        return []
+        return _by_sound(index, key) if by_sound and key else []
     scored = [(difflib.SequenceMatcher(None, key, k).ratio(), index.keys[k]) for k in near]
     best_score, best = max(scored, key=lambda pair: pair[0])
     rivals = {_key(a.name): a for s, a in scored if best_score - s < _TIE and _key(a.name) != _key(best.name)}
     return [best, *rivals.values()]
 
 
-def _match(name: str, cutoff: float) -> list[App]:
+def _match(name: str, cutoff: float, by_sound: bool = True) -> list[App]:
     index = _get_index()
-    found = _lookup(index, name, cutoff)
+    found = _lookup(index, name, cutoff, by_sound)
     if not found and (fresher := _after_miss(index)) is not None:
-        found = _lookup(fresher, name, cutoff)
+        found = _lookup(fresher, name, cutoff, by_sound)
     return found
 
 
-def resolve(name: str, strict: bool = False) -> App | None:
+def resolve(name: str, strict: bool = False, by_sound: bool | None = None) -> App | None:
     """The installed app a spoken name means, or None when there's none or it's ambiguous.
-    strict (the fast path) only accepts names that are exact or one slip away."""
-    found = _match(name, _STRICT_CUTOFF if strict else _CUTOFF)
+    strict (the fast path) only accepts names that are exact or one slip away, and by default
+    not names that only sound like an app ("but what?" must not open Word)."""
+    found = _match(name, _STRICT_CUTOFF if strict else _CUTOFF, (not strict) if by_sound is None else by_sound)
     return found[0] if len(found) == 1 else None
 
 
@@ -1105,6 +1172,37 @@ def switch_to_app(name: str) -> str:
     return f"Switching to {app.name}."
 
 
+_NAMED = 12  # apps named when asked which ones he can open
+
+
+def _and(names: list[str]) -> str:
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+
+
+@tool(level=Level.SAFE, timeout=5.0, cloud=False)
+def list_apps(search: str = "") -> str:
+    """List the apps installed on this laptop. open_app can open every one of them.
+
+    search: part of a name, to list only the apps that match (e.g. office, adobe, python); leave it out for all
+    """
+    # Live (2026-10-23), asked which apps he can open, he named the two that were running
+    # ("Google Chrome, Claude") and then refused to open Settings, Claude and Word.
+    index = _get_index()
+    if not index.apps:
+        raise ToolError("I couldn't read the list of installed apps.")
+    text = " ".join(str(search).split()).strip(" .,!?\"'")
+    if not text:
+        return (f"{len(index.apps)} apps are installed, and I can open any of them, such as "
+                f"{_and(popular(index, _NAMED))}. Name one and I'll open it.")
+    key = _key(text)
+    found = [a for a in index.apps if key and key in _key(a.name)] or _lookup(index, text, _CUTOFF)
+    if not found:
+        return f"No installed app is called {text}."
+    names = [a.name for a in found]
+    more = f", and {len(names) - _NAMED} more" if len(names) > _NAMED else ""
+    return f"Installed: {_and(names[:_NAMED])}{more}."
+
+
 @tool(level=Level.CONFIRM, timeout=6.0, cloud=False)
 def close_app(name: str) -> str:
     """Close an app's windows, as clicking X does (it may still ask to save first).
@@ -1137,6 +1235,13 @@ def _known(m: re.Match) -> dict | None:
     return {"name": app.name} if app else None
 
 
+def _known_or_sounds_like(m: re.Match) -> dict | None:
+    """After a plain "open", a name that only sounds like one app is that app: "open cloud" is
+    Claude, "open wood" is Word (live, 2026-10-23). Opening is harmless, and he says what opened."""
+    app = resolve(m["name"], strict=True, by_sound=True)
+    return {"name": app.name} if app else None
+
+
 def _known_and_open(m: re.Match) -> dict | None:
     """'go to X' is also said of websites and folders: claim it only when X is an open app."""
     app = resolve(m["name"], strict=True)
@@ -1144,7 +1249,15 @@ def _known_and_open(m: re.Match) -> dict | None:
 
 
 INTENTS: list[tuple[str, str, Callable[[re.Match], dict | None]]] = [
-    (r"(?:(?:open|start)(?: up)?|launch|(?:fire|boot|load|bring|pull) up) (?P<name>.+)", "open_app", _known),
+    # "What apps can you open? List them all out.", "What else apps can you access?" (live, 2026-10-23)
+    (r"(?:what|which)(?: other| else| more)? (?:apps?|applications?|programs?)(?: else)? (?:can|could|do|are) "
+     r"(?:you|u)(?: able to)? (?:open|access|launch|start|use|run|have)\b.*", "list_apps", lambda m: {}),
+    (r"(?:list|name|tell me)(?: all)?(?: of)?(?: the| my| your)? (?:installed )?(?:apps|applications|programs)"
+     r"(?: (?:you can open|installed|on (?:this|the|my) (?:laptop|computer|pc)))?", "list_apps", lambda m: {}),
+    (r"what (?:apps|applications|programs) (?:are installed|do i have)(?: installed)?(?: on (?:this|the|my) "
+     r"(?:laptop|computer|pc))?", "list_apps", lambda m: {}),
+    (r"(?:(?:open|start)(?: up)?|launch) (?P<name>.+)", "open_app", _known_or_sounds_like),
+    (r"(?:(?:fire|boot|load|bring|pull) up) (?P<name>.+)", "open_app", _known),
     # Speech-to-text heard "Open Google Chrome" as "But Google Chrome" (live, 2026-10-18). Safe
     # only because the rest must be exactly an installed app's name.
     (r"(?:but|often|oven) (?P<name>.+)", "open_app", _known),

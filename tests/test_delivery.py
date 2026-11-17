@@ -80,7 +80,7 @@ class InventedFactsTests(unittest.TestCase):
         d.acted = True  # the reminder tool ran
         self.assertEqual(d.shape("Set a reminder for 3 PM."), "Set a reminder for 3 PM.")
 
-    def test_no_pretend_work_on_the_bosss_things(self):
+    def test_no_pretend_work_on_the_users_things(self):
         d = Delivery(Never())
         said = turn(d, "how are you doing?", "Still running, still analyzing your files,",
                     "still waiting for your next command.", "What do you need?")
@@ -148,6 +148,42 @@ class SessionOfTheEighteenthTests(unittest.TestCase):
         self.assertEqual(len(said), 1)
 
 
+class RefusingAppsTests(unittest.TestCase):
+    """The user's session of 2026-10-23: asked to open Settings, Claude and Word (all installed),
+    he refused each time without trying."""
+
+    REFUSALS = ("I can't open settings directly.", "Claude is not a valid app I can access.",
+                "I can only open Chrome and Google Chrome is already open.",
+                "Only Chrome and Claude are currently accessible.", "I can access only Google Chrome and Claude.",
+                "No other apps are available.", 'I can\'t open "cloud" as it\'s not an app I can access.')
+
+    def test_an_untried_refusal_is_dropped_when_he_was_asked_for_an_app(self):
+        d = Delivery(Never())
+        for line in self.REFUSALS:
+            self.assertEqual(turn(d, "open claude", line), [], line)
+            self.assertEqual(d.false_refusals, 1, line)
+
+    def test_it_counts_for_the_turn_after_an_app_request_too(self):
+        d = Delivery(Never())
+        turn(d, "Open cloud.", "Understood.")
+        self.assertEqual(turn(d, "Claude.", "I can't open Claude."), [])  # "Open cloud." then "Claude." (live)
+        self.assertEqual(turn(d, "nice weather", "I can't open the window for you."), ["I can't open the window for you."])
+
+    def test_once_an_app_tool_ran_a_refusal_may_be_true(self):
+        d = Delivery(Never())
+        d.start_turn("open photoshop")
+        d.tried("open_app")  # it said there's no such app
+        self.assertEqual(d.shape("I can't open Photoshop: it isn't installed."),
+                         "I can't open Photoshop: it isn't installed.")
+        self.assertEqual(d.false_refusals, 0)
+
+    def test_other_refusals_are_left_alone(self):
+        d = Delivery(Never())
+        for user, line in [("send it to appa", "I can't send messages."), ("what's the weather", "I can't reach the weather service."),
+                           ("can you read my email", "I can't read email.")]:
+            self.assertEqual(turn(d, user, line), [line], line)
+
+
 class TypingAndChatsTests(unittest.TestCase):
     """2026-10-22: he can type and open a chat now, never send."""
 
@@ -213,7 +249,7 @@ class TypingAndChatsTests(unittest.TestCase):
         for line in ("No issues with the system, just like last time.", "Same as last time.",
                      "Your plan looks fine, as usual.", "Like before, it went well."):
             self.assertEqual(turn(d, "how's the system", "Fine.", line), ["Fine."], line)
-        d.start_turn("how was it last time")  # the boss brings it up
+        d.start_turn("how was it last time")  # the user brings it up
         self.assertEqual(d.shape("Same as last time."), "Same as last time.")
         d.start_turn("what did we talk about")
         d.ground("Possibly relevant from earlier:\n- user: my exam is on Friday", fact=True)  # memory says so

@@ -1,7 +1,7 @@
 """The assistant's icon in the notification area (the tray, by the clock): how it stays within
 reach while it sleeps with its window hidden.
 
-The boss, 2026-10-22: in sleep mode "it minimizes the UI and stays in the ... currently running
+The user, 2026-10-22: in sleep mode "it minimizes the UI and stays in the ... currently running
 section on Windows. Basically, it disappears, but it's still there." So the icon shows the state
 at a glance, its tooltip says it in words, and its menu has Wake up, Sleep and Turn off. A click
 on the icon wakes it when it's asleep and shows the window otherwise.
@@ -18,7 +18,7 @@ from aj.ui import theme
 from aj.ui.mic_button import paint_mic
 
 # The states the tray shows. "asleep on battery": asleep with the mic closed, because listening
-# for the wake words is for mains power only (the boss, 2026-10-22); only this icon, the
+# for the wake words is for mains power only (the user, 2026-10-22); only this icon, the
 # shortcut or plugging in brings it back.
 LOADING = "loading"
 AWAKE = "awake"

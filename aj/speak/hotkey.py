@@ -1,6 +1,6 @@
 """The global hotkey that starts and stops AJ (Speak) without clicking it.
 
-The boss, 2026-10-22: "anywhere where I can type anything, I should be able to activate speech to
+The user, 2026-10-22: "anywhere where I can type anything, I should be able to activate speech to
 text." The window is always there, but a click means moving the mouse away from what he is writing,
 so Ctrl+Alt+S does the same as the mic button, from any app.
 

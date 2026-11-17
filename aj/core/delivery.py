@@ -15,10 +15,10 @@ enunciated words in between some sentences". So:
   it stays a reaction rather than a tic.
 
 And the one rule above all of those, accuracy (the user's, from the start): a sentence that
-states something about the boss or this laptop that nobody told him is dropped. Live, the 4B
+states something about the user or this laptop that nobody told him is dropped. Live, the 4B
 model kept inventing ("still monitoring your schedule", "your morning coffee choices",
 "battery at 63 percent", "your grades are below average") despite the persona forbidding it.
-What counts as told: the boss's words this turn and the last two, what memory knows about
+What counts as told: the user's words this turn and the last two, what memory knows about
 him, and tool results. Only claims are caught: "your <thing>", a laptop reading with a
 number, "I'm watching you"; general knowledge ("caffeine blocks adenosine") and questions
 ("did you sleep?") pass.
@@ -29,18 +29,18 @@ after opening WhatsApp, "Screen is now locked." and "System is now powered down.
 - a claim that something was done needs the tool that does it to have succeeded this turn
   ("sent" needs send_whatsapp, "locked" needs lock_screen); any tool at all no longer counts,
   and passive claims ("Message sent.", "is now locked") count as claims;
-- a number in a laptop reading must be one he was given; the word "battery" in the boss's
+- a number in a laptop reading must be one he was given; the word "battery" in the user's
   question no longer vouches for whatever percentage follows;
 - plugged in, unplugged or charging must come from a reading (a tool or the live status),
-  never from the boss's own question ("am I plugged in?").
+  never from the user's own question ("am I plugged in?").
 
-2026-10-22, typing and WhatsApp chats (the boss: "I do not want this AI to type the message and
+2026-10-22, typing and WhatsApp chats (the user: "I do not want this AI to type the message and
 send it for me. I'll do that myself."):
 - nothing can send a message any more, so "sent" is never true, whatever ran;
 - "Typed it." and "Written down." need a typing tool to have worked this turn (live, "Write this
   down." was answered "Written down." with no tool run); "Opened Appa's chat." needs
   whatsapp_open_chat;
-- "Press send when you're ready." tells the boss what to do: an instruction, not a claim.
+- "Press send when you're ready." tells the user what to do: an instruction, not a claim.
 
 From the acceptance run with the real model (the review of 2026-10-22):
 - "I want to talk to Suhinish on WhatsApp" got switch_to_app, then "Suhinish's chat is open."
@@ -52,8 +52,14 @@ From the acceptance run with the real model (the review of 2026-10-22):
   I do for you?". A real follow-up question about the topic ("Want a reminder?") stays, and so
   does an offer that is the whole reply.
 - "No issues with the system, just like last time." There is no last time unless the background
-  notes (memory) or the boss say so: a sentence about a past session ("last time", "as usual",
+  notes (memory) or the user say so: a sentence about a past session ("last time", "as usual",
   "like before") is dropped otherwise.
+
+The other way round, 2026-10-23: asked to open Settings, Claude and Word, all installed, he said
+"I can't open settings directly.", "Claude is not a valid app I can access." and "Only Chrome and
+Claude are available." without trying once. When the user asks to open something or asks about
+apps, a sentence saying an app can't be opened or isn't available is dropped until an app tool
+has run this turn; the brain then tells him to call open_app (false_refusals).
 """
 import random
 import re
@@ -80,7 +86,7 @@ _ABOUT_PEOPLE = re.compile(r"\b(human|humans|humanity|people|species|mankind|soc
                            r"evolution|evolve|world)\b", re.IGNORECASE)
 _REACTION = re.compile(r"^\W*(hm+|mm+|ah+|oh|well|right|okay|ok|so|uh+|um+|huh|ugh|hah)\b", re.IGNORECASE)
 _SIGH_MARK = re.compile(r"\[sigh\]\s*")
-# Taking back the boss's own line straight after saying it.
+# Taking back the user's own line straight after saying it.
 _TAKES_IT_BACK = re.compile(r"^\W*(?:well|okay|ok|so|hm+|ah)?\W*(?:that'?s|that is|it'?s|it is|this is)\s+(?:not|n't)\b"
                             r"|^\W*(?:well|okay|ok|so)?\W*(?:not (?:really|quite|exactly)|just kidding|actually,? no|"
                             r"that'?s not (?:me|quite|really|right|true))\b|\bthat'?s not (?:quite )?(?:right|true|me)\b",
@@ -88,7 +94,7 @@ _TAKES_IT_BACK = re.compile(r"^\W*(?:well|okay|ok|so|hm+|ah)?\W*(?:that'?s|that 
 _SENTENCE_DONE = re.compile(r"[.!?…][\"')\]]*$")
 _WORD = re.compile(r"[a-z']{3,}")
 
-# What he can't know about the boss or this laptop unless told.
+# What he can't know about the user or this laptop unless told.
 _THINGS = (r"schedules?|calendars?|meetings?|appointments?|agendas?|deadlines?|routines?|grades?|gpa|exams?|"
            r"homework|assignments?|coursework|attendance|coffee|tea|breakfast|lunch|dinner|snacks?|diet|"
            r"caffeine|meals?|sleep|bedtime|inbox|emails?|notifications?|messages|habits?|mood|"
@@ -124,7 +130,7 @@ def numbers_in(text: str) -> set[str]:
         if seen:
             found.add(str(total + current))
     return found
-# Plugged in or not: only a reading can say, and what he says must match it. The boss's own
+# Plugged in or not: only a reading can say, and what he says must match it. The user's own
 # question ("am I plugged in?") vouches for nothing.
 _UNPLUGGED = re.compile(r"\b(unplugged|not plugged(?: in)?|on battery(?: power)?|running on (?:the )?battery|"
                         r"discharging)\b", re.IGNORECASE)
@@ -142,7 +148,7 @@ def plug_state(text: str) -> bool | None:
     return True if _PLUGGED.search(text) else None
 _READING = re.compile(r"\d|\b(percent|degrees|stable|normal|charging|charged|full|low)\b", re.IGNORECASE)
 _WATCHING = re.compile(r"\b(monitor\w*|watch(?:ing|ed)?|track(?:ing|ed)?|observ\w*|logg(?:ing|ed))\b", re.IGNORECASE)
-_YOU = re.compile(r"\b(you|your|boss)\b", re.IGNORECASE)
+_YOU = re.compile(r"\b(you|your|boss|sir)\b", re.IGNORECASE)
 _TASKS = re.compile(r"\b(no (?:new |pending )?tasks|tasks? (?:assigned|pending|queued))\b", re.IGNORECASE)
 _ANY_WORD = re.compile(r"[a-z][a-z'-]*")
 # Things done, and the tools that make saying so true (one of them, succeeding this turn). None:
@@ -155,7 +161,7 @@ _OPENS = {"open_app", "switch_to_app", "open_website", "open_file", "open_folder
 _TYPED = {"type_text", "type_that", "polish_typed"}  # put words where the cursor is
 _POWER = {"shutdown_laptop", "restart_laptop", "sleep_laptop", "sign_out"}
 _ACTIONS: list[tuple[str, set[str] | None]] = [
-    # Nothing sends: the boss presses Send himself (2026-10-22).
+    # Nothing sends: the user presses Send himself (2026-10-22).
     (r"sen[dt]|sending|messaged|texted|deliver(?:ed|ing)?|pass(?:ed)? (?:it|that) (?:on|along)|"
      r"(?:pressed|tapped|clicked) (?:on )?(?:the )?send", None),
     # "Typed it." needs the typing done; "I'm typing what you say" may follow start_dictation too.
@@ -217,7 +223,7 @@ _SWITCHES = {"mute", "set_volume", "set_brightness", "lock_screen", *_POWER}
 _TYPE_PROMISE = re.compile(r"\bi(?:'ll| will|'m going to| am going to|'m about to)\s+(?:now\s+|just\s+)?"
                            r"(?:type|write (?:it |that |this )?(?:down|in|out|up)|take (?:it |that |this )?down)\b",
                            re.IGNORECASE)
-# "Press send when you're ready.": telling the boss what to do. Said of himself ("I'll press send")
+# "Press send when you're ready.": telling the user what to do. Said of himself ("I'll press send")
 # it's a promise to send, which is never true.
 _PRESS_SEND = re.compile(r"\b(?:press|hit|tap|click)(?:\s+on)?\s+(?:the\s+)?send(?:\s+button)?\b", re.IGNORECASE)
 _OF_HIMSELF = re.compile(r"\bi(?:'ll| will|'m going to| am going to|'m about to|'d| would)?\s+"
@@ -229,7 +235,7 @@ _DONE = re.compile(r"^\W*(?:(?:all|it'?s|that'?s)\s+)?(?:done|all set|finished|c
                    re.IGNORECASE)
 _NOT_A_CLAIM = re.compile(r"\b(?:not|never|no|cannot|unable|if|whether|want me to|should i|shall i|would you like)\b|"
                           r"n't\b|n.t\b", re.IGNORECASE)
-# "still analyzing your files", "processing your files": work on the boss's things that isn't happening.
+# "still analyzing your files", "processing your files": work on the user's things that isn't happening.
 _DOING = re.compile(r"\b(?:analy[sz]|process|monitor|watch|track|scann|organi[sz]|review|check|optimi[sz]|read|"
                     r"manag|handl|sort|clean|back)ing\s+(?:up\s+)?your\b", re.IGNORECASE)
 # "You've got two hours and thirty-four minutes before it starts": time arithmetic nobody asked for,
@@ -262,15 +268,28 @@ _STOCK_OFFER = re.compile(
     r"|(?:do you |can i help (?:you )?with |)need anything else"
     r"|(?:feel free to (?:ask|reach out)|if you need anything(?: else)?|i(?:'m| am) here (?:if|whenever|when) you need)[^.?!]*"
     r")\W*$", re.IGNORECASE)
-# Talk of an earlier session ("just like last time"): true only when memory or the boss says so.
+# Talk of an earlier session ("just like last time"): true only when memory or the user says so.
 _PAST = re.compile(r"\b(?:last time|(?:the |our |my |your )?(?:previous|last|other) (?:session|conversation|chat|time)|"
                    r"like before|as before|same as before|as (?:usual|always)|like (?:usual|always|yesterday)|"
                    r"same as (?:usual|always|yesterday)|like the other day)\b", re.IGNORECASE)
-# What in a note (memory's "Possibly relevant from earlier:", a past summary) or the boss's words
+# What in a note (memory's "Possibly relevant from earlier:", a past summary) or the user's words
 # makes talk of an earlier session true.
 _PAST_TOLD = re.compile(r"\bearlier\b|\bprevious(?:ly)?\b|\bsession\b|\bbefore\b|\byesterday\b|"
                         r"\bthe other day\b|\busual(?:ly)?\b|\balways\b", re.IGNORECASE)
 _PAST_MARK = "__past__"
+# The user asking for an app, or about apps, this turn or the one before ("Open cloud." then
+# "Claude."): the refusal check below applies only then.
+_ASKS_FOR_APP = re.compile(r"\b(?:open|launch|apps?|applications?|programs?)\b", re.IGNORECASE)
+# "I can't open settings directly.", "Claude is not a valid app I can access.", "I can only open
+# Chrome.", "Only Chrome and Claude are currently accessible.", "No other apps are available."
+_REFUSES_APP = re.compile(
+    r"\b(?:can'?t|cannot|can not|unable to|not able to|no way to|don'?t have (?:access|the ability))\b[^.?!]{0,30}?"
+    r"\b(?:open|launch|start|access|run)\b"
+    r"|\bnot (?:a |an )?(?:valid |available |installed |accessible |known |supported )?(?:app|application|program)\b"
+    r"|\b(?:only|just) (?:able to )?(?:open|access|launch)\b|\b(?:open|access|launch) only\b"
+    r"|\bonly\b[^.?!]{0,60}?\b(?:is|are)\s+(?:currently\s+|now\s+)?(?:available|accessible|supported)\b"
+    r"|\bno other (?:apps?|applications?|programs?)\b", re.IGNORECASE)
+_APP_TOOLS = {"open_app", "switch_to_app", "close_app", "list_apps", "open_website", "open_file", "open_folder"}
 
 
 def stem(word: str) -> str:
@@ -283,7 +302,7 @@ def stem(word: str) -> str:
 
 
 def claims(sentence: str) -> list[str]:
-    """What the sentence asserts about the boss or the laptop, as the words to check."""
+    """What the sentence asserts about the user or the laptop, as the words to check."""
     text = strip_marks(sentence).strip()
     if text.endswith("?"):
         return []  # a question claims nothing
@@ -296,7 +315,7 @@ def claims(sentence: str) -> list[str]:
     if _TASKS.search(text):
         found.append("task")
     if _PAST.search(text):
-        found.append(_PAST_MARK)  # grounded only by memory or the boss (Delivery.ground)
+        found.append(_PAST_MARK)  # grounded only by memory or the user (Delivery.ground)
     return found
 
 
@@ -360,6 +379,7 @@ class Delivery:
         self._sigh_turn = -SIGH_EVERY
         self._last_user: set[str] = set()
         self._last_reaction = ""
+        self._asked_for_app = False
         self.start_turn("")
 
     def start_turn(self, user_text: str, explain: bool = False) -> None:
@@ -383,10 +403,14 @@ class Delivery:
         self._plugged: bool | None = None  # what a reading said: plugged in (True) or on battery
         self._dropping = False  # the rest of a sentence whose start was invented
         self._partial = ""      # the sentence so far: "I cannot shut down," then "sleep, or sign out"
-        self._line_said = False  # the boss's signature line has been said this turn
+        self._line_said = False  # the user's signature line has been said this turn
         self.invented = 0       # sentences dropped this turn for stating what he wasn't told
         self.false_actions = 0  # of those, how many claimed something was done
+        self.false_refusals = 0  # of those, how many said an app can't be opened, with none tried
         self.done: set[str] = set()  # tools that succeeded this turn ("*": treat every claim as true)
+        self.ran: set[str] = set()   # tools that ran this turn, whatever came of them
+        asks = bool(_ASKS_FOR_APP.search(user_text))
+        self._asks_for_app, self._asked_for_app = asks or self._asked_for_app, asks
         self._asked_time = bool(_ASKS_TIME.search(user_text))
         self._about_laptop = bool(_STATUS.search(user_text))  # "how's my battery?": every percentage is a reading
         self.ground(user_text)
@@ -404,12 +428,16 @@ class Delivery:
         """A tool succeeded: what it does may now be said to be done."""
         self.done.add(tool)
 
+    def tried(self, tool: str) -> None:
+        """A tool ran, whether or not it worked: after an app tool, "I can't open X" may be true."""
+        self.ran.add(tool)
+
     def ground(self, text: str, fact: bool = False) -> None:
         """Something he was told this turn: claims about it are fine. `fact`: a reading (a tool's
         result, the live status, memory), the only thing that can vouch for the laptop's state."""
         stems = {stem(w) for w in _ANY_WORD.findall(text.lower())}
         if _PAST.search(text) or (fact and _PAST_TOLD.search(text)):
-            stems.add(_PAST_MARK)  # the boss or a note talks of an earlier time: "like last time" may be true
+            stems.add(_PAST_MARK)  # the user or a note talks of an earlier time: "like last time" may be true
         self._grounded |= stems
         self._numbers |= numbers_in(text)
         if fact:
@@ -427,9 +455,11 @@ class Delivery:
         made_up = any(stem(c) not in self._grounded for c in claims(chunk))
         countdown = not (self._asked_time or self.acted) and bool(_COUNTDOWN.search(text))
         undone = self._undone(sentence)
-        if made_up or countdown or undone or self._unbacked_reading(sentence):
+        refused = self._untried_refusal(sentence)
+        if made_up or countdown or undone or refused or self._unbacked_reading(sentence):
             self.invented += 1
             self.false_actions += undone
+            self.false_refusals += refused
             self._dropping = not _SENTENCE_DONE.search(chunk)
             return True
         return False
@@ -442,6 +472,11 @@ class Delivery:
             if tools is None or (tools and not tools & self.done) or (not tools and not self.done):
                 return True
         return False
+
+    def _untried_refusal(self, sentence: str) -> bool:
+        """Asked for an app, does it say an app can't be opened, with no app tool run this turn?"""
+        return (self._asks_for_app and not (self.ran & _APP_TOOLS) and "*" not in self.done
+                and bool(_REFUSES_APP.search(strip_marks(sentence))))
 
     def _unbacked_reading(self, text: str) -> bool:
         """A reading of this laptop with a number nobody gave him, or plugged in / on battery when
@@ -488,7 +523,7 @@ class Delivery:
     def _keep(self, chunk: str, said: set[str], sentence: str) -> bool:
         if similar(said, self._allow) or (said and said <= self._allow):
             self._line_said = True
-            return True  # the boss's own signature line offered this turn, or a piece of it
+            return True  # the user's own signature line offered this turn, or a piece of it
         if self._answered and _STOCK_OFFER.match(sentence):
             return False  # "How can I assist you further?" after the answer (2026-10-22)
         if self._line_said and _TAKES_IT_BACK.search(sentence):

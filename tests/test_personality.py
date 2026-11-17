@@ -162,7 +162,7 @@ class PromptBandTests(DialCase):
         personality.set_humor(level=75)
         prompt = persona.system_prompt(set())
         self.assertIn("humor setting is 75 percent", prompt)
-        self.assertIn("mock threat", prompt)
+        self.assertIn("polite, understated sarcasm", prompt)  # v7; TARS's mock threats went with v6
 
     def test_an_explicit_level_wins(self):
         personality.set_humor(level=0)

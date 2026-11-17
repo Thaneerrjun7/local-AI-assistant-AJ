@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 
 from aj.config import LOG_DIR, load_settings
-from aj.core import migrate, switch
+from aj.core import migrate, placement, switch
 from aj.core.llm import LlamaServer
 # The rest of AJ (the speech libraries above all) is imported in main(), after the model
 # server has been started, so the model loads while Python imports (2026-10-21).
@@ -117,7 +117,7 @@ def main() -> int:
         return 1
 
     settings = load_settings()
-    server = LlamaServer(settings.llm)
+    server = LlamaServer(placement.start_settings(settings))  # [placement] auto: on battery, the 780M from the start
     server.launch()
     from aj.engine import Engine
     engine = Engine(settings, hear=not args.text, speak=not args.mute, barge_in=args.headphones, server=server,

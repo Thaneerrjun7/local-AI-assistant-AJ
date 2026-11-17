@@ -1,6 +1,6 @@
-"""Who has the boss's words right now: AJ (Speak), or the assistant's own dictation.
+"""Who has the user's words right now: AJ (Speak), or the assistant's own dictation.
 
-The boss can open AJ (Speak) by voice ("AJ, speak") or by hand while the assistant is on and
+The user can open AJ (Speak) by voice ("AJ, speak") or by hand while the assistant is on and
 listening. Both hear the same microphone, so what he says for AJ (Speak) to type would also reach
 the assistant as a command (the review of 2026-10-22). So:
 - AJ (Speak) raises a named Windows event, Local\\AJ.Speak.Listening, for as long as a dictation of
@@ -15,7 +15,7 @@ with it, so a crash never leaves the other side deaf. Reading one opens it by na
 milliseconds: a few microseconds, done once per utterance.
 
 The names start with AJ_SHARE_NAMESPACE ("AJ" unless set): the test suite sets a namespace of its
-own (tests/__init__.py), so a test can never make the boss's running assistant deaf.
+own (tests/__init__.py), so a test can never make the user's running assistant deaf.
 """
 import ctypes
 import os
@@ -48,7 +48,7 @@ AJ_DICTATING = "Dictating"
 
 
 class Flag:
-    """A named event this process raises while it has the boss's words. Made on first use."""
+    """A named event this process raises while it has the user's words. Made on first use."""
 
     def __init__(self, what: str):
         self.what = what
@@ -87,7 +87,7 @@ def is_set(what: str) -> bool:
 
 
 def speak_listening() -> bool:
-    """Is AJ (Speak) taking a dictation right now? Then the boss's words are for it."""
+    """Is AJ (Speak) taking a dictation right now? Then the user's words are for it."""
     return is_set(SPEAK_LISTENING)
 
 

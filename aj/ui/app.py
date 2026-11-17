@@ -29,7 +29,7 @@ from PyQt6.QtWidgets import QApplication
 from aj.core import switch
 from aj.core.pipeline import Status
 from aj.engine import Events
-from aj.ui import theme
+from aj.ui import native, theme
 from aj.ui.bridge import Bridge
 from aj.ui.mic_button import app_icon
 from aj.ui.tray import Tray, state_for
@@ -59,14 +59,15 @@ def _palette() -> QPalette:
 
 
 def make_app() -> QApplication:
-    """The QApplication, styled: Fusion + dark palette + the red stylesheet, Segoe UI, the icon."""
+    """The QApplication, styled: Fusion + dark palette + the stylesheet (for the parts that are
+    still widgets: the yes-or-no box and the tray menu), Inter, the icon."""
     if sys.platform == "win32":  # group under AJ's own taskbar icon, not pythonw's
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("AJ.Assistant")
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setApplicationName("AJ")
     app.setStyle("Fusion")
     app.setPalette(_palette())
-    app.setFont(QFont(theme.FONT, 10))
+    app.setFont(QFont(native.load_font(), 10))
     app.setStyleSheet(theme.STYLESHEET)
     app.setWindowIcon(app_icon())
     app.styleHints().setColorScheme(Qt.ColorScheme.Dark)  # dark title bar on Windows 11
@@ -82,6 +83,7 @@ def connect(bridge: Bridge, window: AJWindow, tray: Tray | None = None) -> None:
     bridge.show_requested.connect(window.bring_to_front)  # the shortcut: asleep, that wakes him too
     bridge.confirm_requested.connect(lambda question: bridge.answer_confirm(window.confirm(question), question))
     bridge.confirm_settled.connect(window.close_confirm)
+    bridge.working.connect(window.set_working)
     if tray is not None:
         bridge.status.connect(lambda status: tray.set_state(state_for(status)))
         window.closing.connect(lambda _: tray.set_state(state_for(Status.TURNING_OFF)))

@@ -1,6 +1,6 @@
 """AJ (Speak)'s logic, with no Qt: one dictation from a click on the mic to "Typed".
 
-The boss, 2026-10-22: speech to text "anywhere where I can type anything", "I want it to be
+The user, 2026-10-22: speech to text "anywhere where I can type anything", "I want it to be
 accurate", and "I do not want this AI to type the message and send it for me. I'll do that myself."
 So a dictation is, in order:
 1. Where: the window in front right now (dictation.choose_target). AJ (Speak) never takes the

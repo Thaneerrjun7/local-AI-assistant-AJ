@@ -3,7 +3,7 @@
 Two features need to see inside another app without a screenshot:
 - WhatsApp chat search (tools/whatsapp.py) has to know when WhatsApp has finished loading its
   chats, find its search box and read the open chat's name. SivaSafe judged that by sending
-  full-screen screenshots to Gemini, which sent the boss's chat list to the cloud (his worry,
+  full-screen screenshots to Gemini, which sent the user's chat list to the cloud (his worry,
   2026-10-22). UI Automation reads the same window locally, as text, and nothing leaves the laptop.
 - Dictation has to know whether the keyboard focus is in a text box before it types, what the box
   already holds, whether it takes line breaks and where its caret is: focused_editable(),

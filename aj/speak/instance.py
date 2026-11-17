@@ -8,7 +8,7 @@ The first one waits on the event in the kernel (no polling, no timer), so it cos
 idle. The name is a parameter only so the tests can use names of their own and never meet a real
 AJ (Speak) running on the desktop.
 
-"Listen now" (2026-10-22): the assistant starts AJ (Speak) with --listen when the boss says "AJ,
+"Listen now" (2026-10-22): the assistant starts AJ (Speak) with --listen when the user says "AJ,
 speak"; when one is already running, the second launch sets this event as well as "show yourself".
 """
 import ctypes

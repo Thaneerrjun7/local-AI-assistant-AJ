@@ -265,7 +265,7 @@ class FlowTests(FlowTestCase):
         fake = FakeWhatsApp()
 
         def move_away_before_enter():
-            if fake.typed:  # the name is in: now the boss clicks elsewhere while Ctrl is let go
+            if fake.typed:  # the name is in: now the user clicks elsewhere while Ctrl is let go
                 fake.focused = "other"
 
         fake.on_wait = move_away_before_enter

@@ -5,7 +5,7 @@ AJ starts speaking the first chunk while the model is still writing the rest.
 Each turn is timed from the moment you stopped talking, so the latency report shows
 where every millisecond went.
 
-Dictation (2026-10-22): after "write this down" (or a WhatsApp chat opening), the boss's next
+Dictation (2026-10-22): after "write this down" (or a WhatsApp chat opening), the user's next
 words are the message, not a turn. They're collected as audio, never transcribed here, until he
 has been quiet for DictationSettings.silence_secs (1.5 s: people pause mid-sentence while
 dictating; a normal turn ends after 0.3 s), then handed to Brain.dictate. The VAD itself still
@@ -14,7 +14,7 @@ cuts at 0.3 s (core/speech.py), and its pieces are joined, so nothing about the 
 Sleep mode (2026-10-22): asleep, everything heard goes past core/wake.py's Gate first and only
 an utterance that starts with its name ("Hey AJ, open WhatsApp") gets through, the name taken
 off. The rest is dropped unseen: never shown, answered or remembered, and no dictation is taken.
-Listening while asleep is for mains power only (the boss's rule): unplugged, the mic closes.
+Listening while asleep is for mains power only (the user's rule): unplugged, the mic closes.
 
 The review of 2026-10-22:
 - A dictation's words never reach the log: on_turn (which engine.print_turn writes to aj.log) is
@@ -55,7 +55,8 @@ if TYPE_CHECKING:
 
 # The whole utterance must be the command, so "turn off the music" is not mistaken for it.
 # "AJ" since 2026-10-22, as Parakeet writes it ("AJ", "A.J.", "A J"), or "Computer".
-_OFF = re.compile(r"^\W*(hey\W+)?((?:computer|aj|a\W?j)\W+)?(please\W+)?"
+# "All right, turn off." (live, 2026-10-23) went to the model, which took it for the laptop.
+_OFF = re.compile(r"^\W*((?:all\W*right|ok(?:ay)?|right|so|then)\W+)?(hey\W+)?((?:computer|aj|a\W?j)\W+)?(please\W+)?"
                   r"((turn|switch|power)\W+(yourself\W+)?off|shut\W*(yourself\W+)?down|go\W+dark|good\W*bye|"
                   r"de\W*activate(\W+yourself)?)"
                   r"(\W+(computer|aj|now|please))*\W*$", re.IGNORECASE)
@@ -94,7 +95,7 @@ class Status(StrEnum):
     DICTATING = "dictating"  # waiting for, or hearing, words to type
     MIC_FAILED = "mic failed"  # the mic wouldn't open: shown, with the window up, until it does (2026-10-22)
     # Sleep mode (2026-10-22): in the tray, answering only its name. On battery the mic is closed
-    # (the boss: unplugged "this feature should not be available at all"); with the mic button
+    # (the user: unplugged "this feature should not be available at all"); with the mic button
     # off nothing said can wake it either. The tray and the shortcut always can.
     ASLEEP = "asleep"
     ASLEEP_ON_BATTERY = "asleep on battery"
@@ -153,7 +154,7 @@ class TurnTimes:
         return " · ".join(parts) + " ms" if parts else ""
 
 
-_MODE_LINES = {"wake": "Here.", "sleep": "Going quiet. Say my name when you need me."}
+_MODE_LINES = {"wake": "Yes, sir?", "sleep": "Very good, sir. Call when you need me.", "clap": "Hello, sir."}
 
 
 def mode_line(lines, pool: str) -> str:
@@ -250,9 +251,11 @@ class WavMic:
         self.done.set()
 
 
-# Said over AJ, the start of the boss's words is kept and put in front of the rest; this
+# Said over AJ, the start of the user's words is kept and put in front of the rest; this
 # long after the interruption, it no longer belongs to anything ("stop" and then silence).
 CUT_IN_KEEP_SECS = 4.0
+# The quiet put between the pieces of a turn when they are heard again as one (_hear_whole).
+WHOLE_GAP_SECS = 0.15
 # The mic reopening (2026-10-22): tries in a row, the wait between them, and how long after a
 # failed round it is tried again.
 MIC_TRIES = 3
@@ -269,9 +272,9 @@ class Session:
     """Listens, decides when you've finished, and answers.
 
     While AJ speaks, the mic keeps listening (`interrupt`, the default since 2026-10-18):
-    core/barge.py tells his own voice coming back through the speakers from the boss talking
-    over him. When it's the boss, he stops at once, the boss's words are heard out from their
-    start, and only what the boss actually heard of the cut-off reply stays in the conversation.
+    core/barge.py tells his own voice coming back through the speakers from the user talking
+    over him. When it's the user, he stops at once, the user's words are heard out from their
+    start, and only what the user actually heard of the cut-off reply stays in the conversation.
     With headphones, `barge_in=True` stops him at any speech at all, as before.
 
     The window drives it from another thread: set_listening() turns the mic on or off, ask()
@@ -285,18 +288,26 @@ class Session:
                  on_heard: Callable[[str], None] | None = None, listening: bool = True,
                  interrupt: bool = False, dictation=None, gate: Gate | None = None,
                  on_ac: Callable[[], bool | None] | None = None, ready: Callable[[], None] | None = None,
-                 speak_listening: Callable[[], bool] = mic_share.speak_listening):
+                 speak_listening: Callable[[], bool] = mic_share.speak_listening,
+                 wakes_gpu: Callable[[], bool] | None = None, clap=None):
         """`dictation`: the engine's core.dictation.Dictation. While it's armed, speech is taken
         down for typing (Brain.dictate) instead of answered.
         `gate`: sleep mode (core/wake.py); None, always awake (the console modes and older tests).
         `on_ac`: core/power_source.on_ac_power, asked every few seconds while asleep.
         `ready`: called on the answer's thread before the model is needed (the engine reloads it
         there if sleep mode let go of it).
-        `speak_listening`: is AJ (Speak) taking a dictation? Then what is heard isn't for us."""
+        `speak_listening`: is AJ (Speak) taking a dictation? Then what is heard isn't for us.
+        `wakes_gpu`: is the model on the RTX 4050, whose clocks the pings while you talk are for?
+        None: always (as before core/placement.py); on the 780M they would only cost power.
+        `clap`: a core.clap.ClapDetector. Asleep, two claps wake him like his name does, and he
+        says hello (the "clap" lines); awake it hears nothing."""
+        self.clap = clap
+        self._clap_fed = False  # the detector has audio from this sleep (reset when he wakes)
         self.s = settings.voice
         self.d = settings.dictation
         self.dictation = dictation
         self.gate, self.on_ac, self.ready = gate, on_ac, ready
+        self.wakes_gpu = wakes_gpu
         self._speak_listening = speak_listening
         self._power_every = settings.sleep.power_check_secs
         self._power_at = 0.0     # when the power cable was last looked at (0: look now)
@@ -319,9 +330,9 @@ class Session:
         self._turn_started = 0.0
         self._barge = (BargeIn(ears.transcribe, mouth.player.said_lately)
                        if interrupt and not barge_in and ears is not None and mouth is not None else None)
-        self._cut = False  # the boss talked over this reply
+        self._cut = False  # the user talked over this reply
         self._cut_at = 0.0
-        self._cut_start: np.ndarray | None = None  # the boss's first words, said over AJ
+        self._cut_start: np.ndarray | None = None  # the user's first words, said over AJ
         self._settle = False  # an answer just ended: reset the ears before listening on
         self._answer_to: Callable[[bool], None] | None = None  # a yes/no question waiting for a spoken answer
         self._mic_failed = False  # the mic is wanted but wouldn't open
@@ -415,11 +426,11 @@ class Session:
             times.first_sound = self.mouth.player.first_sound_at or 0.0
         if self._cut:
             heard = self.mouth.player.heard() if self.mouth is not None else ""
-            self.brain.cut_off(heard)  # what the boss didn't hear was never said
+            self.brain.cut_off(heard)  # what the user didn't hear was never said
             reply = f"{heard} ... (cut off)".strip()
         if self.on_turn:
             self.on_turn(text, reply, times)
-        if not self._cut:  # cut off, the boss is still talking: keep listening to him
+        if not self._cut:  # cut off, the user is still talking: keep listening to him
             self._settle = True  # the loop thread resets the ears: only it may touch them
         self.quiet.set()
 
@@ -497,6 +508,18 @@ class Session:
         if self._barge is not None:
             self._barge.reset()
 
+    def _hear_whole(self, pieces: list[np.ndarray]) -> str:
+        """A turn the voice detector cut in pieces at his pauses, heard again as one: Parakeet
+        gets words right from the whole sentence that it gets wrong from a half (2026-10-23, the
+        user: understood only when he spoke carefully). One more transcription, only for such turns."""
+        gap = np.zeros(int(MIC_RATE * WHOLE_GAP_SECS), dtype=np.float32)
+        joined = np.concatenate([part for piece in pieces for part in (piece, gap)][:-1])
+        try:
+            return self.ears.transcribe(joined)
+        except Exception as exc:  # noqa: BLE001 - the pieces' own words still stand
+            print(f"(hearing the whole turn again failed: {exc})", flush=True)
+            return ""
+
     def _hear(self, block: np.ndarray) -> list[np.ndarray]:
         """One mic block into the VAD. A VAD error costs what was being heard, never AJ."""
         try:
@@ -516,8 +539,8 @@ class Session:
                 return
 
     def _cut_in(self) -> None:
-        """The boss started talking over AJ: stop him now, and hear the boss out from the
-        start of what they said (the VAD restarts on the boss alone, so the echo before it is
+        """The user started talking over AJ: stop him now, and hear the user out from the
+        start of what they said (the VAD restarts on the user alone, so the echo before it is
         left out)."""
         self._cut, self._cut_at = True, time.perf_counter()
         self._cut_start = self._barge.recent_audio()
@@ -534,6 +557,8 @@ class Session:
         """A single ping isn't enough: the GPU starts clocking down again right after it.
         So ping every 0.4 s while you're talking (one at a time), and never when you're not."""
         if not self.ears.hearing_speech or time.perf_counter() - self._last_wake < 0.4:
+            return
+        if self.wakes_gpu is not None and not self.wakes_gpu():
             return
         if self._waker is not None and self._waker.is_alive():
             return
@@ -641,6 +666,27 @@ class Session:
         else:
             self.gate.wake()
 
+    def _clapped(self, block: np.ndarray | None, busy: bool) -> bool:
+        """Asleep and not answering: the block goes to the clap detector, and two claps wake him.
+        Only asleep (the user, 2026-11-18): awake, a clap is just a clap."""
+        if self.clap is None or self.gate is None:
+            return False
+        if not self.asleep or busy:
+            if self._clap_fed:
+                self.clap.reset()  # a fresh start next time he sleeps
+                self._clap_fed = False
+            return False
+        if block is None:
+            return False
+        self._clap_fed = True
+        if not self.clap.feed(block):
+            return False
+        self.gate.wake()
+        self.clap.reset()
+        self._clap_fed = False
+        self._start_turn(self._say_mode_line, ("clap", "(two claps)", TurnTimes(stopped_talking=time.perf_counter())))
+        return True
+
     def _start_turn(self, work: Callable, args: tuple) -> None:
         if self._worker is not None:
             self._worker.join()
@@ -701,6 +747,10 @@ class Session:
                     self.gate.sleep()  # Settings.sleep.idle_mins with nothing answered
                     continue
                 block = self._next_block(mic_on, busy)
+                if self._clapped(block, busy):  # asleep, two claps: awake, hello, and listening again
+                    pending, heard = "", []
+                    self._update_status(mic_on)
+                    continue
                 self._update_status(mic_on)
                 confirming = busy and self._answer_to is not None
                 if busy and not self.barge_in and self._barge is None and not confirming:
@@ -748,6 +798,8 @@ class Session:
                     self._dictation_step()
                 if pending and not self.ears.hearing_speech and time.perf_counter() >= deadline:
                     (text, pending), (audio, heard) = (pending, ""), (heard, [])
+                    if len(audio) > 1:
+                        text = self._hear_whole(audio) or text
                     self._route(text, times, audio)
         finally:
             if self._worker is not None:

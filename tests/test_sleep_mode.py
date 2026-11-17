@@ -67,7 +67,10 @@ class ScriptedEars:
         return [block] if block[0] >= 1 else []
 
     def transcribe(self, samples, rate: int = MIC_RATE) -> str:
-        return self.lines[int(samples[0])]
+        """Its line, or for pieces heard again as one (Session._hear_whole), each piece's line."""
+        marks = [int(v) for v in np.asarray(samples) if v >= 1]
+        runs = [m for i, m in enumerate(marks) if i == 0 or m != marks[i - 1]]
+        return " ".join(self.lines[m] for m in runs)
 
 
 class FakeLines:
@@ -116,8 +119,26 @@ class Recorder:
         self.turns.append((text, reply))
 
 
+CLAP_MARK = -7.0  # a block starting with this is "two claps" to FakeClap
+
+
+class FakeClap:
+    """Says two claps happened on a block marked CLAP_MARK (core/clap.py is tested on its own)."""
+
+    def __init__(self):
+        self.fed = 0
+        self.resets = 0
+
+    def feed(self, block) -> bool:
+        self.fed += 1
+        return float(block[0]) == CLAP_MARK
+
+    def reset(self) -> None:
+        self.resets += 1
+
+
 class SessionTests(unittest.TestCase):
-    def start(self, on_ac=lambda: True, idle_mins: float = 0.0, dictation=None):
+    def start(self, on_ac=lambda: True, idle_mins: float = 0.0, dictation=None, clap=None):
         settings = Settings()
         settings.sleep.power_check_secs = 0.05
         settings.voice.unfinished_wait_secs = 0.3
@@ -132,7 +153,8 @@ class SessionTests(unittest.TestCase):
         self.gate = Gate(WakeWords(settings.wake_names), idle_mins=idle_mins)
         self.session = Session(settings, self.ears, self.brain, None, self.mic, self.stop,
                                on_turn=self.events.on_turn, on_status=self.events.on_status,
-                               on_heard=self.events.on_heard, gate=self.gate, on_ac=ac, dictation=dictation)
+                               on_heard=self.events.on_heard, gate=self.gate, on_ac=ac, dictation=dictation,
+                               clap=clap)
         self.thread = threading.Thread(target=self.session.run, daemon=True)
         self.thread.start()
         self.addCleanup(self.finish)
@@ -169,6 +191,36 @@ class SessionTests(unittest.TestCase):
         self.assertTrue(wait_until(lambda: self.brain.asked == ["what time is it?"]))
         self.assertTrue(wait_until(lambda: self.status() == Status.LISTENING))
         self.assertEqual(self.gate.mode, Mode.AWAKE)
+
+    def clap_twice(self) -> None:
+        self.mic.blocks.put(np.full(MIC_BLOCK, CLAP_MARK, dtype=np.float32))
+
+    def test_asleep_two_claps_wake_him_and_he_says_hello(self):
+        """2026-11-18: "I clap twice, and AJ pops up, says hello, sir"."""
+        clap = FakeClap()
+        self.start(clap=clap)
+        self.session.sleep()
+        self.assertTrue(wait_until(lambda: self.status() == Status.ASLEEP))
+        self.clap_twice()
+        self.assertTrue(wait_until(lambda: ("(two claps)", "<clap>") in self.events.turns))
+        self.assertFalse(self.gate.asleep)
+        self.assertEqual(self.brain.asked, [])  # a line, no model
+        self.assertTrue(wait_until(lambda: self.status() == Status.LISTENING))  # the window comes back
+
+    def test_awake_claps_are_just_claps(self):
+        """Only while he's asleep in the tray (the user, 2026-11-18)."""
+        clap = FakeClap()
+        self.start(clap=clap)
+        self.clap_twice()
+        time.sleep(0.3)
+        self.assertEqual(clap.fed, 0)
+        self.assertEqual(self.events.turns, [])
+
+    def test_go_to_the_tray_is_going_to_sleep(self):
+        self.start()
+        self.say("AJ, go to the tray.")
+        self.assertTrue(wait_until(lambda: self.status() == Status.ASLEEP))
+        self.assertEqual(self.events.turns, [("AJ, go to the tray.", "<sleep>")])
 
     def test_the_name_alone_wakes_it_with_a_short_line(self):
         self.start()
@@ -284,9 +336,11 @@ class StatusTests(unittest.TestCase):
         self.assertEqual(pipeline.pick_status(True, True, False, True, asleep=True), Status.SPEAKING)
 
     def test_off_command_with_measured_spellings(self):
-        for said in ("AJ, turn off.", "OJ turn off.", "Hey A.J., turn off", "Computer, shut down"):
+        for said in ("AJ, turn off.", "OJ turn off.", "Hey A.J., turn off", "Computer, shut down",
+                     "All right, turn off.", "Okay, AJ, turn off."):  # the first went to the model (2026-10-23)
             self.assertTrue(is_off_command(said), said)
         self.assertFalse(is_off_command("AJ, turn off the music"))
+        self.assertFalse(is_off_command("All right, turn off the lights."))
 
 
 class FakeServer:

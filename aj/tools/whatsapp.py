@@ -1,6 +1,6 @@
-"""WhatsApp by voice: "go to Appa" gets the boss into Appa's chat, and goes no further.
+"""WhatsApp by voice: "go to Appa" gets the user into Appa's chat, and goes no further.
 
-The boss (2026-10-22): open WhatsApp, search the name in WhatsApp's own search bar, press Enter
+The user (2026-10-22): open WhatsApp, search the name in WhatsApp's own search bar, press Enter
 and get him into the chat, the way SivaSafe did it. He types and sends the message himself:
 nothing here ever types into the message box or sends anything. And no contact list: "I don't
 want the entire contact database to be on the AI". WhatsApp's search does the finding, and the
@@ -29,7 +29,7 @@ locally. What it shows was measured live on 2026-10-22 with scripts/probe_whatsa
   left there for dictation.
 
 Every key (each letter of the name, Ctrl+A, Backspace, Enter, Escape) goes in the same order (the
-review of 2026-10-22): first any modifier the boss is holding gets its moment to be let go, and if
+review of 2026-10-22): first any modifier the user is holding gets its moment to be let go, and if
 it is still held nothing is pressed (with Ctrl down, letters are shortcuts); then the focus is
 checked to still be the search box; then the key. Checked the other way round, the focus could
 move during the wait. And a call the dispatcher gave up on (its timeout) presses nothing more.
@@ -469,7 +469,7 @@ _WANT = r"(?:(?:i (?:want|need|would like|wanna)|id like|i have|lets|let me|can 
 _TALK = r"(?:talk|chat|speak|text|message|write) (?:to|with)|chat|talk|reach|contact|ping|text|message|whatsapp"
 
 INTENTS: list[tuple[str, str, Callable[[re.Match], dict | None]]] = [
-    # "Open WhatsApp and go to Appa": the boss's own phrasing (2026-10-22).
+    # "Open WhatsApp and go to Appa": the user's own phrasing (2026-10-22).
     (rf"open whatsapp and (?:{_GO}|message|text|talk to|chat with|speak to) (?P<rest>.+)(?P<whatsapp>)",
      "whatsapp_open_chat", _explicit),
     # "I want to talk to Suhinish on WhatsApp", "chat with Appa on WhatsApp", "on WhatsApp, talk to Amma".

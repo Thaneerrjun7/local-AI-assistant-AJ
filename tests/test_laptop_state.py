@@ -24,12 +24,12 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(
             SNAP.summary(),
             'battery 80%, plugged in; in front: Google Chrome (2 windows: "YouTube", "Inbox"); '
-            "also open: WhatsApp (minimised), Settings; volume 40%; brightness 60%; online; CPU 9%, RAM 71% used; "
+            "also running: WhatsApp (minimised), Settings; volume 40%; brightness 60%; online; CPU 9%, RAM 71% used; "
             "free space C: 120 GB of 475 GB")
 
     def test_what_isnt_known_is_left_out(self):
         self.assertEqual(Snapshot(battery=12, plugged=False, muted=True, volume=30).summary(),
-                         "battery 12%, on battery power; no apps open; sound muted")
+                         "battery 12%, on battery power; no apps running; sound muted")
 
     def test_browser_titles_lose_the_browser_name_and_stay_short(self):
         self.assertEqual(ls._short("Inbox - Google Chrome", "Google Chrome"), "Inbox")
@@ -138,7 +138,7 @@ class BrainUsesItTests(unittest.TestCase):
             said = b.reply("is chrome open?", None, TurnTimes(0.0))
         self.assertIn(f"[Laptop now: {SNAP.summary()}]", model.call_args.args[1][-1]["content"])
         self.assertEqual(said, "Yes, Chrome's open.")
-        self.assertNotIn("Laptop now", b.history[-2]["content"])  # history keeps the boss's words only
+        self.assertNotIn("Laptop now", b.history[-2]["content"])  # history keeps the user's words only
 
     def test_the_real_reading_passes_and_a_made_up_one_doesnt(self):
         b = self.make(FakeState())

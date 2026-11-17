@@ -1,16 +1,16 @@
-# AJ (Computer Local Assistant): a local, real-time voice assistant
+# Local AI Assistant AJ: a local, real-time voice assistant
 
 AJ is a voice assistant that runs **entirely on a Windows gaming laptop**. You talk; it starts answering in about a second. It's fast, it's private, and it runs on a 6 GB laptop GPU. You call it "AJ" or "Computer".
 
 **It can:**
 - control the laptop with 47 permission-gated tools
 - type what you say wherever your cursor is (dictation), in the assistant or in its own small window, AJ (Speak)
-- sleep in the tray and wake when it hears its name
+- sleep in the tray and wake when it hears its name, or when you clap twice
 - remember you between sessions
 - hand hard questions to a second reasoning model
 - fall back to Gemini only when local models can't help
 
-It talks like TARS from Interstellar: the answer first, plain words, exact numbers, deadpan humor at a level you set by voice, and honesty fixed at 100 percent.
+It talks in the manner of JARVIS from the Iron Man films: composed, polite and dryly witty, calling you "sir", with the answer first, exact numbers, humor at a level you set by voice, and honesty fixed at 100 percent.
 
 > **Demo:** _60-second video coming soon_
 
@@ -30,7 +30,7 @@ It talks like TARS from Interstellar: the answer first, plain words, exact numbe
 - **Long-term memory** in SQLite + FTS5, recalled in ~0.5 ms per turn and learned in the background only when idle.
 - **Grounding guardrail:** a sentence that states facts about the user or device that nobody told the model is dropped before it's spoken.
 - **A CPU voice:** Piper, with no graphics memory used and ready in under 2 s. Chatterbox Turbo voice cloning stays available for a bigger GPU.
-- **858 automated tests.**
+- **1,053 automated tests.**
 
 ## How it works
 
@@ -114,7 +114,7 @@ The thinker loads on demand in 1.6 s.
   - **personality:** "set humor to 45" or "turn your humor down" turns the humor dial (steps of 15, 60 by default; "stop joking" is 0)
 - **Dictation:** say "write this down" (or "type …") and the next thing you say is typed where your cursor is, in any app. Gemini (gemini-3.5-transcribe) writes it down; Parakeet stands in when Gemini can't, and AJ says so. "Make it nicer" rewrites it as polite English (gemini-3.1-flash-lite). It types only into a text box, and never presses Enter or Send: a newline is Shift+Enter, and sending is yours.
 - **AJ (Speak):** the same dictation as a small floating window of its own, with no model to load, so it is up in a moment. Click its mic or press Ctrl+Alt+S anywhere, speak, and the words are typed where your cursor was. It runs from its own desktop shortcut (`scripts\install_speak_shortcut.ps1`, `pythonw -m aj.speak`).
-- **Sleep mode:** "go to sleep" hides AJ in the tray. Asleep, it answers only an utterance that starts with its name: "Hey AJ, open WhatsApp" wakes it and runs the command in the same breath. It listens for its name only while the laptop is plugged in; on battery the mic is closed. "Turn off" still turns it off.
+- **Sleep mode:** "go to sleep" (or "go to the tray", "hide") hides AJ in the tray. Asleep, it answers only an utterance that starts with its name: "Hey AJ, open WhatsApp" wakes it and runs the command in the same breath. Two claps wake it too, and it says hello; record your own clap with `scriptsecord_clap.py` and only claps that sound like yours count. It listens for its name only while the laptop is plugged in; on battery the mic is closed. "Turn off" still turns it off.
 - **Always-on listener (optional):** a small background process that, while the laptop is plugged in and AJ is off, starts AJ when you say "Hey AJ" or "Computer" and passes on the rest of what you said. On battery it closes the mic and unloads its models. What it hears is only checked for the name, never kept or logged. Listening costs about 0.75 GB of RAM and ~0.3% of the CPU. Install it (Startup shortcut, starts now): `powershell -ExecutionPolicy Bypass -File scripts\install_listener.ps1`; remove it with `-Remove`.
 - **Safety:**
   - permission tiers SAFE / CONFIRM / BLOCKED / LOCKED
@@ -126,7 +126,7 @@ The thinker loads on demand in 1.6 s.
   - facts and conversation in SQLite (WAL) with FTS5, no cap, nightly backup
   - "what do you know about me" and "forget …"
 - **Persona:**
-  - TARS's manner, from the film only, described in its own words: answer first, plain words, exact numbers, deadpan humor
+  - JARVIS's manner, described in its own words, in this laptop's real world (no suits or labs): answer first, exact numbers, dry wit, "sir" and "boss"
   - reply length adapts: one sentence by default, a real explanation when asked
   - a live clock in every turn
   - an anti-repetition layer
@@ -167,7 +167,7 @@ aj/
   persona.py  system prompt and per-turn rules
   voice_server.py   Chatterbox process (runs in its own environment)
 scripts/      setup, model downloads, shortcuts, benchmarks, voice recorder
-tests/        858 tests
+tests/        1,053 tests
 ```
 
 ## Setup (Windows, NVIDIA GPU)
@@ -223,8 +223,8 @@ The shortcuts store absolute paths: run the install scripts again after moving t
 
 ## Credits and licence
 
+- **Author:** designed and built by [Thaneerrjun7](https://github.com/Thaneerrjun7). I designed the architecture, picked every model from benchmark data and blind listening tests, and tested it live on my own laptop. AI coding tools helped along the way.
 - **Licence:** the code is MIT-licensed (see `LICENSE`).
-- **How it was built:** with AI-assisted development (Claude Code). I designed the system and chose the models from benchmark data and blind listening tests; the AI wrote much of the code under my direction.
 
 ## Models and licences
 

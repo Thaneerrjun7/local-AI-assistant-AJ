@@ -1,4 +1,4 @@
-"""Persona v6: the rules the prompt is built from (TARS's manner, docs/TARS_RESEARCH.md)."""
+"""Persona v7: the rules the prompt is built from (JARVIS's manner, "sir" and "boss", 2026-11-18)."""
 import re
 import tempfile
 import unittest
@@ -79,12 +79,12 @@ class PromptTests(unittest.TestCase):
 
 class NameTests(unittest.TestCase):
     def test_aj_also_called_computer(self):
-        # The boss, 2026-10-22: the project is AJ, and he still calls it Computer.
+        # The user, 2026-10-22: the project is AJ, and he still calls it Computer.
         self.assertEqual((persona.NAME, persona.ALIAS), ("AJ", "Computer"))
         prompt = persona.system_prompt(set(), humor=60)
         self.assertTrue(prompt.startswith("You are AJ,"))
         self.assertIn("also calls you Computer", prompt)
-        self.assertIn("never call yourself TARS", prompt)
+        self.assertIn("never call yourself JARVIS", prompt)
         self.assertIn("\nAJ: ", prompt)  # the examples speak as AJ
 
     def test_alias_from_settings(self):
@@ -96,8 +96,24 @@ class NameTests(unittest.TestCase):
         self.assertNotIn("also calls you", same)
 
 
+class OwnerTests(unittest.TestCase):
+    def test_whose_laptop(self):
+        """2026-11-18: "a local assistant running on <my> laptop"; the name comes from settings."""
+        named = persona.system_prompt(set(), humor=60, owner="Sam  Lee")
+        self.assertIn("running on Sam Lee's laptop", named)
+        self.assertIn("You are talking to Sam Lee, the one person who uses it.", named)
+        plain = persona.system_prompt(set(), humor=60)
+        self.assertIn("running on this laptop", plain)
+
+    def test_settings_default_to_the_windows_account(self):
+        from aj.config import Settings
+        with mock.patch.dict("os.environ", {"USERNAME": "Sam Lee"}):
+            self.assertEqual(Settings().owner_name(), "Sam Lee")
+            self.assertEqual(Settings(owner="Sammy").owner_name(), "Sammy")
+
+
 class CharacterTests(unittest.TestCase):
-    """Nothing of v5 is left (the boss, 2026-10-22: erase all of it), and v6 is TARS's manner."""
+    """Nothing of v5 is left (the user, 2026-10-22: erase all of it), and v7 is JARVIS's manner."""
 
     def test_nothing_of_the_old_character_survives(self):
         everything = [persona.system_prompt(NEW_TOOLS | {"lock_screen"}, humor=h) for h in (0, 20, 60, 75, 100)]
@@ -106,12 +122,31 @@ class CharacterTests(unittest.TestCase):
             self.assertNotRegex(text, r"(?i)question\?|\bfriend\b|good good|\byou not\b|\bI not\b|"
                                       r"\bwhat you need\b|learned English")
 
-    def test_tars_manner(self):
+    def test_jarvis_manner(self):
         prompt = persona.system_prompt(set(), humor=60)
-        for trait in ["TARS", "Interstellar", "Efficiency first", "Lead with the answer", "Candid",
-                      "Numbers are exact", "never whine", "honesty setting is 100 percent"]:
+        for trait in ["JARVIS", "Iron Man", "Efficiency first", "Lead with the answer", "Candid",
+                      "Numbers are exact", "never whine", "honesty setting is 100 percent", "Witty and engaged"]:
             self.assertIn(trait, prompt)
-        self.assertIn("no nickname or term of address", prompt)
+        self.assertNotIn("TARS", prompt)
+        self.assertNotIn("no nickname or term of address", prompt)
+
+    def test_calls_the_user_sir_and_boss(self):
+        """The user, 2026-11-18: "I want him to call me sir and boss"; never in text to send."""
+        prompt = persona.system_prompt(set(), humor=60)
+        self.assertIn('You call the user "sir", and now and then "boss"', prompt)
+        self.assertIn("Never put either into text the user will send", prompt)
+        replies = " ".join(reply for _, reply, _ in persona._EXAMPLES)
+        self.assertIn(" sir", replies)
+        self.assertIn("boss", replies)
+        message = next(r for _, r, _ in persona._EXAMPLES if "Hi Mum" in r).split('"')[1]
+        self.assertNotIn("sir", message)  # the text he writes for someone else has no "sir" in it
+
+    def test_not_the_films_world(self):
+        """ "DO NOT base everything on the movies as if I have a Hulkbuster and Iron Man suits." """
+        prompt = persona.system_prompt(set(), humor=100)
+        self.assertIn("There are no suits, armour", prompt)
+        self.assertIn("never make up a scan, a diagnostic or a reading", prompt)
+        self.assertIn("don't recite film dialogue", prompt)
 
     def test_examples_are_short(self):
         for said, reply, joke in persona._EXAMPLES:
@@ -141,9 +176,9 @@ class HumorBandTests(unittest.TestCase):
         self.assertIn("Rarely", persona.humor_rules(20))
         self.assertIn("occasional short joke", persona.humor_rules(60))
         self.assertIn("frequent", persona.humor_rules(75))
-        for level in (0, 20, 60):
-            self.assertNotIn("mock threat", persona.humor_rules(level))
-        self.assertIn("mock threat", persona.humor_rules(100))
+        for level in (0, 20, 60, 100):
+            self.assertNotIn("mock threat", persona.humor_rules(level))  # TARS's, gone with v7
+        self.assertIn("polite, understated sarcasm", persona.humor_rules(100))
 
     def test_more_humor_shows_more_dry_lines(self):
         joked = [joke[0] for _, _, joke in persona._EXAMPLES if joke]

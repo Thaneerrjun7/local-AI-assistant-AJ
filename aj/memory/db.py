@@ -173,7 +173,7 @@ class Store:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         unsafe = check_wal(self.path)
-        if unsafe:  # never delete or move it here: the boss decides what it is
+        if unsafe:  # never delete or move it here: the user decides what it is
             raise UnsafeDatabase(f"memory is off: {unsafe}. Move {self.path.name}-wal aside to start memory again.")
         self._lock = threading.RLock()
         self.generation = 0  # bumped on every fact change

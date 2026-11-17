@@ -2,7 +2,7 @@
 
 Power, the microphone, the ears, the wake words and starting AJ are all faked: no microphone is
 opened, no model is loaded and nothing is started. The named kernel objects are real but get
-names of their own, so a listener the boss has running is never touched."""
+names of their own, so a listener the user has running is never touched."""
 import io
 import logging
 import queue

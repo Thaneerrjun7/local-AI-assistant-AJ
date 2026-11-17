@@ -1,4 +1,5 @@
 .venv/
+.venv-shaders/
 __pycache__/
 *.pyc
 models/

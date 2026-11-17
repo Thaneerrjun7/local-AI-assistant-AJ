@@ -1,6 +1,6 @@
 # Creates the "AJ (Speak).lnk" shortcut on the Desktop: click it and a small speech-to-text window
 # opens (python -m aj.speak, run with pythonw so no console appears). It is a plain desktop
-# shortcut the boss asked for (2026-10-22); nothing here runs at sign-in.
+# shortcut the user asked for (2026-10-22); nothing here runs at sign-in.
 # Remove it with: scripts\install_speak_shortcut.ps1 -Remove
 param([switch]$Remove)
 $ErrorActionPreference = "Stop"

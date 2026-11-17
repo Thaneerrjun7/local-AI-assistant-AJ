@@ -21,7 +21,7 @@ class EchoTests(unittest.TestCase):
         self.assertTrue(is_echo("", SAID))  # a murmur: nothing to act on
         self.assertTrue(is_echo("uh", SAID))
 
-    def test_different_words_are_the_boss(self):
+    def test_different_words_are_the_user(self):
         self.assertFalse(is_echo("actually tell me about tomorrow instead", SAID))
         self.assertFalse(is_echo("open spotify", SAID))
 
@@ -52,7 +52,7 @@ class BargeInTests(unittest.TestCase):
             hit = b.feed(np.zeros(MIC_BLOCK, np.float32), hearing) or hit
         return hit
 
-    def test_the_boss_is_noticed_after_a_short_listen(self):
+    def test_the_user_is_noticed_after_a_short_listen(self):
         b = self.make("tell me about tomorrow instead")
         self.assertFalse(self.feed(b, barge.FIRST_CHECK_SECS - 0.1))
         self.transcribe.assert_not_called()  # too soon to tell
@@ -92,7 +92,7 @@ class PlayerWordsTests(unittest.TestCase):
 
 
 class CutOffTests(unittest.TestCase):
-    def test_history_keeps_only_what_the_boss_heard(self):
+    def test_history_keeps_only_what_the_user_heard(self):
         b = Brain("http://x", Settings())
         b.history = [{"role": "user", "content": "what's the weather"},
                      {"role": "assistant", "content": SAID + " Bring an umbrella anyway."}]
@@ -120,7 +120,7 @@ class SessionCutInTests(unittest.TestCase):
         self.assertTrue(brain.cancel.is_set())
         mouth.silence.assert_called_once()
         ears.reset.assert_called_once()
-        self.assertEqual(len(s._cut_start), MIC_BLOCK)  # the boss's first words are kept
+        self.assertEqual(len(s._cut_start), MIC_BLOCK)  # the user's first words are kept
 
     def test_a_cut_off_turn_keeps_the_mic_state_and_trims_the_reply(self):
         s, ears, brain, mouth = self.make()
@@ -128,7 +128,7 @@ class SessionCutInTests(unittest.TestCase):
         s._cut = True
         s._answer("what's the weather", TurnTimes(0.0))
         brain.cut_off.assert_called_once_with("The weather today is clear,")
-        ears.reset.assert_not_called()  # the boss is still talking
+        ears.reset.assert_not_called()  # the user is still talking
 
     def test_a_normal_turn_has_the_loop_reset_the_ears(self):
         s, ears, brain, mouth = self.make()

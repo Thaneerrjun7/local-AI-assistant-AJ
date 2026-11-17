@@ -1,6 +1,6 @@
 """Does the voice say every word clearly? It speaks each test sentence (exactly as a reply would
 be spoken: the same clean-up and voice settings), then Parakeet, the speech-to-text that hears
-the boss, writes down what it heard. Words that come back different are words said unclearly.
+the user, writes down what it heard. Words that come back different are words said unclearly.
 
 Nothing is played aloud. Run: .venv\\Scripts\\python.exe scripts\\check_pronunciation.py
 """
@@ -46,7 +46,7 @@ SENTENCES = [
     "You said you're going to school later, but you didn't say which school.",
     "Hmm. I don't know that yet. Want me to look it up?",
     "Good question. I think the answer is yes.",
-    # "good" sounded like "guv" and "RAM" like "rum" to the boss (2026-10-22): see chunker._SAY_AS
+    # "good" sounded like "guv" and "RAM" like "rum" to the user (2026-10-22): see chunker._SAY_AS
     "Good.", "Good, that's done.", "Good. Opening it now.", "Sounds good.", "Not good.", "Very good.",
     "Good morning.", "That's a good question.", "Good good good.", "That looks good to me.",
     "Your RAM is fine.", "RAM usage is 68 percent.", "Close a few tabs to free up RAM.",

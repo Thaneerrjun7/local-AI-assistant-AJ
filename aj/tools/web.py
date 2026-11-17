@@ -65,7 +65,7 @@ SITES = {
 }
 
 # How a browser window showing each site is titled, and the name to say. "Open YouTube" with a
-# YouTube window already open switches to it rather than opening another tab (the boss's ask,
+# YouTube window already open switches to it rather than opening another tab (the user's ask,
 # 2026-10-18). Windows shows only each window's visible tab, so a tab behind another isn't seen.
 SHOWN_AS = {
     "youtube": (r"(?:^| - )YouTube$", "YouTube"),

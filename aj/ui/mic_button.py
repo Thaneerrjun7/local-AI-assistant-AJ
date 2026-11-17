@@ -1,12 +1,9 @@
-"""The big round mic button, and the app icon drawn from the same mic shape.
-
-Painted from a few shapes, so there are no image files to ship. It repaints only when its
-state changes or the pointer enters or leaves it: nothing animates, so it costs nothing idle.
-Checked = listening (bright red), unchecked = mic off (grey, struck through).
+"""The microphone drawn with QPainter, and the app icon made from it: the tray (ui/tray.py) and
+AJ (Speak) draw their icons with it. Painted from a few shapes, so there are no image files to
+ship. (The window's own mic button is QML now: qml/MicGlyph.qml.)
 """
 from PyQt6.QtCore import QPointF, QRectF, Qt
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
-from PyQt6.QtWidgets import QAbstractButton, QWidget
 
 from aj.ui import theme
 
@@ -58,56 +55,3 @@ def app_icon() -> QIcon:
         p.end()
         icon.addPixmap(pixmap)
     return icon
-
-
-class MicButton(QAbstractButton):
-    def __init__(self, diameter: int = 136, parent: QWidget | None = None):
-        super().__init__(parent)
-        self.setCheckable(True)
-        self.setChecked(True)
-        self.setFixedSize(diameter, diameter)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setAttribute(Qt.WidgetAttribute.WA_Hover)  # repaint on pointer enter/leave only
-        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)  # a mouse click shouldn't leave a focus ring
-        self.setAccessibleName("Microphone")
-
-    def hitButton(self, pos) -> bool:
-        """Only the disc is clickable, not the square corners around it."""
-        r = self.width() / 2
-        return (pos.x() - r) ** 2 + (pos.y() - r) ** 2 <= r * r
-
-    def _colours(self) -> tuple[QColor, QColor, QColor]:
-        """(fill, ring, glyph) for the current state."""
-        if not self.isEnabled():
-            return QColor("#1b1b1f"), QColor(theme.BORDER), QColor(theme.DIM)
-        if self.isChecked():
-            fill, ring, glyph = QColor(theme.RED), QColor(theme.RED_BRIGHT), QColor("white")
-        else:
-            fill, ring, glyph = QColor(theme.OFF_FILL), QColor(theme.OFF_RING), QColor("#a4a4ac")
-        if self.isDown():
-            fill = fill.darker(125)
-        elif self.underMouse():
-            fill = fill.lighter(118)
-        return fill, ring, glyph
-
-    def paintEvent(self, event) -> None:
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        fill, ring, glyph = self._colours()
-        outer = QRectF(self.rect()).adjusted(1, 1, -1, -1)
-        if self.isEnabled() and self.isChecked():  # a soft halo, so "listening" reads at a glance
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor(255, 42, 42, 38))
-            p.drawEllipse(outer)
-        body = outer.adjusted(11, 11, -11, -11)
-        p.setPen(QPen(ring, 3))
-        p.setBrush(fill)
-        p.drawEllipse(body)
-        if self.hasFocus() and self.isEnabled():  # keyboard users can see where Space will go
-            p.setPen(QPen(QColor(theme.TEXT), 1, Qt.PenStyle.DotLine))
-            p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawEllipse(body.adjusted(-6, -6, 6, 6))
-        size = body.width() * 0.44
-        c = body.center()
-        paint_mic(p, QRectF(c.x() - size / 2, c.y() - size / 2, size, size), glyph,
-                  slashed=not self.isChecked(), behind=fill)

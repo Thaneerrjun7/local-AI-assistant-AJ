@@ -25,10 +25,53 @@ ERROR = ("Stopped: something went wrong", theme.RED_BRIGHT)
 # The mic button and text box work only once the conversation can actually start.
 NOT_READY = {Status.LOADING, Status.TURNING_OFF}
 
+# The orb has a look for each Status, named by its value (qml/OrbStates.js), and one for an
+# engine that died. The status words take the alarm's colour too (the user, 2026-10-23).
+ERROR_MODE = "error"
+ERROR_TONE = "#ff5a4e"
+_TONES = {Status.MIC_FAILED: "#ffa25c"}
+
 
 def look(status: Status) -> tuple[str, str]:
     """(label, dot colour) for the status line."""
     return _LOOKS[status]
+
+
+def orb_mode(status: Status) -> str:
+    """The orb's look for a status."""
+    return status.value
+
+
+# A tool running (Phase 2, 2026-10-23): "Working · weather" and the orb's Working look, while
+# AJ would otherwise show Thinking. A tool not named here shows its own name, spaced out.
+WORKING_MODE = "working"
+_TOOL_WORDS = {
+    "get_weather": "weather", "calculate": "calculating", "web_search": "searching the web",
+    "current_time": "the time", "play_youtube": "YouTube", "open_website": "a website",
+    "open_app": "apps", "switch_to_app": "apps", "close_app": "apps", "list_apps": "apps", "snap_window": "windows",
+    "find_files": "files", "list_folder": "files", "open_file": "files", "open_folder": "files",
+    "copy_file": "files", "move_file": "files", "rename_file": "files", "delete_file": "files",
+    "read_text_file": "files", "undo_last": "undoing",
+    "create_reminder": "reminders", "list_reminders": "reminders", "cancel_reminder": "reminders",
+    "start_timer": "a timer", "whatsapp_open_chat": "WhatsApp",
+    "set_volume": "sound", "mute": "sound", "media": "media", "set_brightness": "brightness",
+    "battery_status": "the laptop", "laptop_status": "the laptop", "disk_space": "the laptop",
+    "type_text": "typing", "type_that": "typing", "polish_typed": "typing", "start_dictation": "dictation",
+    "what_do_you_know": "memory", "forget_fact": "memory",
+}
+
+
+def working_text(tool: str) -> str:
+    return f"Working · {_TOOL_WORDS.get(tool, tool.replace('_', ' '))}"
+
+
+# The statuses the orb moves with a voice in: the window reads the levels only then.
+LEVEL_STATUSES = frozenset({Status.HEARING, Status.SPEAKING, Status.DICTATING})
+
+
+def tone(status: Status) -> str:
+    """The status words' colour: "" for the usual, or the alarm's."""
+    return _TONES.get(status, "")
 
 
 def mic_caption(listening: bool) -> str:

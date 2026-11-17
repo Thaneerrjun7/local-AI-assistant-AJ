@@ -1,5 +1,5 @@
-"""His humor setting: a dial from 0 to 100 percent that the boss turns by voice, the way Cooper
-turns TARS's in Interstellar. Persona v6 (2026-10-22), the boss: "TARS from Interstellar for high
+"""His humor setting: a dial from 0 to 100 percent that the user turns by voice, the way Cooper
+turns TARS's in Interstellar. Persona v6 (2026-10-22), the user: "TARS from Interstellar for high
 efficiency paired with adjustable humor". docs/TARS_RESEARCH.md has the film's settings and where
 each comes from.
 
@@ -10,7 +10,7 @@ each comes from.
   countdown. One step ("turn your humor down") is 15, Cooper's own last cut (75 to 60); from the
   default, one step up is 75, the setting TARS flew the whole mission on.
 - Honesty is not a dial here. TARS ran at 90 percent; Computer runs at 100, fixed, because the
-  core rules (no invented facts, nothing said to be done that wasn't) came from the boss's own
+  core rules (no invented facts, nothing said to be done that wasn't) came from the user's own
   live findings. Asked about it, or asked to lower it, he says so.
 - A tool result is spoken as it is, so the answers are short and in character ("Humor at 45
   percent."), and the intents below catch the usual ways of saying it, so the dial turns with no

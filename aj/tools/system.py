@@ -750,7 +750,7 @@ INTENTS = [
             rf"|how(?:s| s| is) (?:the |my )?battery(?: doing| looking)?|(?:check|show) (?:the |my )?battery"
             r"|am i (?:plugged in|charging|on battery)|is (?:it|the laptop|my laptop|the battery) (?:charging|plugged in)"),
      "battery_status", _nothing),
-    # Speech-to-text often writes "battery" as "better" for the boss: "How much better percentages
+    # Speech-to-text often writes "battery" as "better" for the user: "How much better percentages
     # there left?" missed this live (2026-10-22) and the model read out the RAM instead; so did
     # "my battery presentation right now" and the correction "No, I'm talking about battery
     # percentage." "better" and "batter" count only next to a battery word (percent, percentage,

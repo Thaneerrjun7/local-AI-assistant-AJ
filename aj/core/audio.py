@@ -3,7 +3,12 @@
 The mic is opened only while AJ is allowed to listen and closed otherwise, which
 releases the device (battery mode, games, voice chat). The player keeps one output
 stream open while AJ is awake, so speaking never waits for a device to open.
+
+Both keep a Level: how loud each block was, for the window's orb, which moves with AJ's voice
+and with yours (docs/UI_REDESIGN_PLAN.md, Phase 2).
 """
+import collections
+import math
 import queue
 import threading
 import time
@@ -33,9 +38,36 @@ MIC_RATE = 16000
 MIC_BLOCK = 512  # 32 ms: Silero VAD's window size
 
 
+def loudness(rms: float) -> float:
+    """A block's RMS on a speech scale, 0..1: -50 dBFS (a quiet room) is 0, -12 dBFS (loud
+    speech) is 1."""
+    if rms <= 1e-6:
+        return 0.0
+    return min(1.0, max(0.0, (20 * math.log10(rms) + 50) / 38))
+
+
+class Level:
+    """How loud the audio going through was, block by block: one number per block with when it
+    was taken. Written by the audio callback (one mean per block, nothing more), read by the
+    window 30 times a second; a deque's append and copy are safe across the two threads."""
+
+    def __init__(self, keep: int = 64):
+        self._history: collections.deque[tuple[float, float]] = collections.deque(maxlen=keep)
+
+    def push(self, samples: np.ndarray) -> None:
+        rms = float(np.sqrt(np.mean(samples * samples))) if len(samples) else 0.0
+        self._history.append((time.perf_counter(), loudness(rms)))
+
+    def at(self, when: float, window: float = 0.05) -> float:
+        """The loudest block taken in the `window` seconds up to `when` (perf_counter); 0 if none,
+        so a closed mic or a silent speaker reads as quiet."""
+        return max((v for t, v in list(self._history) if when - window <= t <= when), default=0.0)
+
+
 class Mic:
     def __init__(self):
         self.blocks: queue.Queue[np.ndarray] = queue.Queue()
+        self.level = Level()  # how loud you are
         self._stream = None
 
     @property
@@ -43,7 +75,9 @@ class Mic:
         return self._stream is not None
 
     def _on_audio(self, indata, frames, time_info, status) -> None:
-        self.blocks.put(indata[:, 0].copy())
+        block = indata[:, 0].copy()
+        self.blocks.put(block)
+        self.level.push(block)
 
     def open(self) -> None:
         if self._stream is None:
@@ -63,9 +97,9 @@ class Mic:
 class Player:
     """Plays queued buffers back to back. stop() silences it at once (barge-in).
 
-    Each buffer can carry the words it says, so it's known what the boss has actually heard
+    Each buffer can carry the words it says, so it's known what the user has actually heard
     this turn (an interrupted reply goes into the conversation only that far) and what was
-    said in the last few seconds (to tell AJ's echo from the boss, core/barge.py)."""
+    said in the last few seconds (to tell AJ's echo from the user, core/barge.py)."""
 
     def __init__(self, rate: int = 24000):
         self.rate = rate
@@ -78,6 +112,9 @@ class Player:
         self.idle = threading.Event()
         self.idle.set()
         self.first_sound_at: float | None = None  # perf_counter when this turn's audio began
+        # How loud each block it sends to the speakers is. A block is heard `output_latency`
+        # after it's sent, which is when the window's orb should move with it.
+        self.level = Level()
 
     def open(self) -> None:
         if self._stream is None:
@@ -146,3 +183,4 @@ class Player:
             if self._current is None and self._queue.empty():
                 self.idle.set()
         outdata[:, 0] = out
+        self.level.push(out)

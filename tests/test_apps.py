@@ -281,7 +281,8 @@ class ResolveTests(AppsCase):
         self.assertIsNone(apps.resolve("discort", strict=True))  # the fast path only takes near-exact names
 
     def test_no_loose_matching(self):
-        for said in ["youtube music", "gmail", "note", "steem", "spot", "a jar", "aj", "uninstall node js",
+        # "steem" was here until 2026-10-23: it sounds just like Steam, so it now is (SoundTests).
+        for said in ["youtube music", "gmail", "note", "spot", "a jar", "aj", "uninstall node js",
                      "google", "edge", "c"]:
             with self.subTest(said=said):
                 self.assertIsNone(apps.resolve(said))
@@ -554,7 +555,8 @@ class IntentTests(AppsCase):
         self.assertEqual(intents.match("open youtube"), ("open_app", {"name": "YouTube"}))
         self.assertEqual(intents.match("go to youtube"), ("open_website", {"url_or_site": "youtube"}))
         self.assertEqual(intents.match("open gmail"), ("open_website", {"url_or_site": "gmail"}))  # a site, not an app
-        for said in ["open a jar", "start a timer", "close the door", "open discort", "open aj",
+        # "open discort" was here until 2026-10-23: it sounds just like Discord, so it now is (SoundTests).
+        for said in ["open a jar", "start a timer", "close the door", "close discort", "open aj",
                      "shut down", "how do I open a jar", "open chrome and search for cats", "close the window",
                      "start", "open"]:
             with self.subTest(said=said):
@@ -565,11 +567,89 @@ class IntentTests(AppsCase):
         self.windows.return_value = [Window(7, "Spotify", frozenset({"spotify.exe"}), frozenset())]
         self.assertEqual(intents.match("go to spotify"), ("switch_to_app", {"name": "Spotify"}))
 
+    def test_a_command_after_other_words(self):
+        # The user's session of 2026-10-23: each of these went to the model, which refused.
+        for said, expected in [
+            ("Actually, you know what? I changed my mind. Open settings.", ("open_app", {"name": "Settings"})),
+            ("Jarvis open chrome for me.", ("open_app", {"name": "Google Chrome"})),
+            ("All right, open Spotify.", ("open_app", {"name": "Spotify"})),
+            ("No no open whatsapp, whatsapp.", ("open_app", {"name": "WhatsApp"})),
+            ("What apps can you open? List them all out.", ("list_apps", {})),
+            ("What else apps can you access?", ("list_apps", {})),
+            ("Which apps can you open?", ("list_apps", {})),
+            ("List all the apps.", ("list_apps", {})),
+            ("What apps do I have installed?", ("list_apps", {})),
+            ("Bring up the Spotify thing please.", ("open_app", {"name": "Spotify"})),
+        ]:
+            with self.subTest(said=said):
+                self.assertEqual(intents.match(said), expected)
+
+    def test_a_command_taken_back_is_not_run(self):
+        for said in ["Open Chrome. No, don't.", "I don't want you to open Chrome.", "Don't open Spotify.",
+                     "Open Spotify? No."]:
+            with self.subTest(said=said):
+                self.assertIsNone(intents.match(said))
+
     def test_patterns_are_plain_strings(self):
         for pattern, _, build in apps.INTENTS:
             self.assertIsInstance(pattern, str)
             re.compile(pattern)
             self.assertTrue(callable(build))
+
+
+class SoundTests(AppsCase):
+    """Misheard names (the user's session of 2026-10-23): "open cloud" for Claude, "open wood" for Word."""
+
+    def setUp(self):
+        super().setUp()
+        saved = intents._rules
+        self.addCleanup(setattr, intents, "_rules", saved)
+        intents.collect([apps, web])
+        apps._install([*self.apps, App("Claude", "appid", "Claude_pzs8sxrjxfjjc!Claude", aumid="Claude_pzs8sxrjxfjjc!Claude"),
+                       App("Word", "appid", "Microsoft.Office.WINWORD.EXE.15", exes=("winword.exe",)),
+                       App("Mail", "appid", "microsoft.windowscommunicationsapps_8wekyb3d8bbwe!mail")], True)
+
+    def test_how_names_sound(self):
+        for a, b in [("Claude", "cloud"), ("Word", "wood"), ("Steam", "steem"), ("WhatsApp", "watsap"),
+                     ("Discord", "discort"), ("Weather", "whether")]:
+            with self.subTest(a=a, b=b):
+                self.assertEqual(apps.sound_of(a), apps.sound_of(b))
+        for a, b in [("Word", "world"), ("Teams", "Steam"), ("YouTube", "type"), ("Code", "Claude")]:
+            with self.subTest(a=a, b=b):
+                self.assertNotEqual(apps.sound_of(a), apps.sound_of(b))
+
+    def test_a_misheard_name_is_the_one_app_it_sounds_like(self):
+        for said, expected in [("cloud", "Claude"), ("wood", "Word"), ("steem", "Steam"), ("discard", "Discord"),
+                               ("watsap", "WhatsApp")]:
+            with self.subTest(said=said):
+                self.assertEqual(apps.resolve(said).name, expected)
+        self.assertIsNone(apps.resolve("cloud", strict=True))  # the fast path only after "open"
+
+    def test_words_that_only_roughly_sound_like_an_app_are_nothing(self):
+        # Measured on the user's 147 apps: "what" sounds like Word and "court" like (VS) Code.
+        for said in ["what", "court", "cat", "good", "door", "timer", "photo"]:
+            with self.subTest(said=said):
+                self.assertIsNone(apps.resolve(said))
+
+    def test_the_fast_path_takes_a_sound_alike_after_open_only(self):
+        for said, expected in [("Open cloud.", "Claude"), ("No open cloud.", "Claude"), ("Open wood.", "Word"),
+                               ("No no open word, word.", "Word")]:
+            with self.subTest(said=said):
+                self.assertEqual(intents.match(said), ("open_app", {"name": expected}))
+        for said in ["But what?", "close wood", "switch to cloud", "open a jar"]:
+            with self.subTest(said=said):
+                self.assertIsNone(intents.match(said))
+
+    def test_list_apps(self):
+        said = apps.list_apps()
+        self.assertTrue(said.startswith(f"{len(apps._current.apps)} apps are installed, and I can open any of them, "
+                                        "such as WhatsApp, Google Chrome, Spotify"), said)
+        self.assertTrue(said.endswith("Name one and I'll open it."))
+        self.assertEqual(apps.list_apps("visual"), "Installed: Visual Studio Code.")
+        self.assertEqual(apps.list_apps("cloud"), "Installed: Claude.")
+        self.assertEqual(apps.list_apps("photoshop"), "No installed app is called photoshop.")
+        self.assertIsNotNone(registry.get("list_apps"))
+        self.assertEqual(registry.get("list_apps").level, Level.SAFE)
 
 
 class RealLaptopTests(unittest.TestCase):

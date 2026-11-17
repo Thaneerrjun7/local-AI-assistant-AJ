@@ -19,7 +19,7 @@ and then ("Hm.", "Right.") and drops an aside he has already made recently. Memo
 you to each turn. It goes after the persona prefix and never into it, so the model's prompt
 cache stays valid.
 
-Dictation (core/dictation.py, the boss's ask of 2026-10-22): after "write this down", or after a
+Dictation (core/dictation.py, the user's ask of 2026-10-22): after "write this down", or after a
 WhatsApp chat opens ("What would you like to say?"), his next words are not a turn for the model:
 dictate() has them typed where he asked, and he presses Send himself. A one-go "type <words>"
 claimed by the fast path hands type_text this turn's own audio, so Gemini writes the words down
@@ -38,7 +38,7 @@ import sys
 import threading
 import time
 from collections import deque
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import datetime
 
 from aj import persona
@@ -54,7 +54,7 @@ from aj.lines import Lines
 # prefix the model caches, so a request with a different list (or none) re-reads ~3,000 tokens,
 # about 0.7 s (measured). Unregistered names are skipped. Since v4 he gets every tool he has, as
 # SivaSafe's Gemini did: with only some of them, he claimed to do the rest in words.
-LLM_TOOLS = ["open_app", "switch_to_app", "close_app", "open_website", "play_youtube",
+LLM_TOOLS = ["open_app", "switch_to_app", "close_app", "list_apps", "open_website", "play_youtube",
              "set_volume", "mute", "set_brightness", "media", "snap_window", "screenshot",
              "battery_status", "laptop_status", "current_time", "disk_space",
              "create_reminder", "start_timer", "list_reminders", "cancel_reminder",
@@ -72,14 +72,18 @@ MAX_TOOL_ROUNDS = 3  # find a file, then open it: tool calls may follow tool res
 # Results from these are raw material (search hits, file listings) for Qwen to summarise,
 # not sentences to read out word for word.
 _SUMMARISE = {"web_search", "find_files", "list_folder", "read_text_file", "list_reminders"}
-# Facts the boss asks questions about: Qwen answers the question from them.
+# Facts the user asks questions about: Qwen answers the question from them.
 _ANSWER_FROM = {"get_weather"}
 # Tools that can take a second or two: a waiting line plays if they haven't finished by then.
 # type_text waits on Gemini's transcript; opening a chat waits for WhatsApp to load.
 _SLOW = {"get_weather", "web_search", "find_files", "whatsapp_open_chat", "type_text", "type_that", "polish_typed"}
 # Results written to be said as they are, however long ("Gemini wasn't available, so I used the
 # offline ears. Check it before you send. Typed it in WhatsApp. Press send when you're ready.").
-_SAY_AS_IS = {"start_dictation", "type_text", "type_that", "polish_typed", "whatsapp_open_chat"}
+_SAY_AS_IS = {"start_dictation", "type_text", "type_that", "polish_typed", "whatsapp_open_chat", "list_apps"}
+# Apps: what the tool returned is the whole answer, whoever called it ("Opening Claude.", "I can't
+# find an app called Photoshop."). Live (2026-10-23) the model called switch_to_app for "open
+# Chrome" and then said only "What do you need?", so the user couldn't tell whether anything opened.
+_APP_TOOLS = {"open_app", "switch_to_app", "close_app", "list_apps"}
 # Tools that put words where the cursor is: after one of them, a chat that just opened needs no dictation.
 _TYPES = {"start_dictation", "type_text", "type_that", "polish_typed"}
 # What the model is told when it opened a chat itself: the question and the listening are done in code.
@@ -95,7 +99,7 @@ _ASKED_WHAT = re.compile(r"\bwhat (?:would|do|did|will) you (?:like|want|wanna) 
 # Names the model echoes as speaker labels ("Computer: I am your friend."): its own two names
 # and the prompt's own example labels.
 _LABELS = ("AJ", "Computer", "User", "Assistant")
-# Readings: safe to run again by themselves when the boss says the answer was wrong.
+# Readings: safe to run again by themselves when the user says the answer was wrong.
 _READINGS = {"battery_status", "laptop_status", "current_time", "disk_space", "get_weather", "list_reminders",
              "web_search", "find_files", "list_folder", "read_text_file", "what_do_you_know"}
 # "That's not true.", "Are you sure?", "Check again.", "Make a new accurate reading.": live
@@ -111,6 +115,9 @@ _CHALLENGE = re.compile(
 _NOTHING_DONE = ("[Check: part of your reply said something was done, but no tool ran, so that part wasn't said. "
                  "If an action was asked for and a tool can do it, call the tool now. If none can, say plainly "
                  "that you can't. Otherwise just carry on naturally. Don't mention this note.]")
+_NOT_TRIED = ("[Check: you said you can't open it, or that it isn't available, but you never called open_app, so that "
+              "wasn't said. open_app knows every app installed on this laptop, misheard names included: call it now "
+              "with the name the user said. Don't mention this note.]")
 _RECHECK_HOW = ("[You doubted yourself, so you just took that reading again; it's above. Answer from this fresh "
                 "result only. If your last answer was wrong, admit it in a few words; if it was right, say so "
                 "plainly, without arguing.]")
@@ -121,7 +128,7 @@ RELAY_TEMPERATURE = 0.3  # retelling facts: a little variety in the wording, non
 RECENT_ACTIONS_SECS = 10 * 60  # what he did is mentioned to him for this long
 # The live status and his recent actions go into a message only when it's about the laptop or
 # something on it: sent every turn, he answered "how's it going" and "relax" with what was open
-# and how the battery was (the boss: "completely jumping left and right", 2026-10-19).
+# and how the battery was (the user: "completely jumping left and right", 2026-10-19).
 _ABOUT_LAPTOP = re.compile(
     r"\b(laptop|computer|pc|machine|system|battery|charg\w*|plugged|power\w*|apps?|programs?|windows?|"
     r"open\w*|clos\w*|running|front|minimi[sz]\w*|tabs?|chrome|browser|whatsapp|spotify|discord|explorer|"
@@ -152,7 +159,7 @@ _WEATHER_HOW = ("[That's the forecast. Answer exactly what the user asked, the w
 
 
 def _humor() -> int | None:
-    """The boss's humor setting (tools/personality.py), or None when that module isn't loaded or
+    """The user's humor setting (tools/personality.py), or None when that module isn't loaded or
     can't say. Only a module that loaded is asked: importing a broken one here could leave half
     its tools registered."""
     module = sys.modules.get("aj.tools.personality")
@@ -181,6 +188,8 @@ class Brain:
         # No added "Hm."/"Right." since v5: the character says little (core/delivery.py).
         self.delivery = Delivery(real_sighs=real_sighs, react=False)
         self.name = getattr(settings, "name", persona.NAME)
+        owner_name = getattr(settings, "owner_name", None)
+        self.owner = owner_name() if callable(owner_name) else ""  # whose laptop: the prompt names them
         names = dict.fromkeys([self.name, getattr(persona, "ALIAS", ""), *_LABELS])
         self._labels = re.compile(rf"(?:^|(?<=\s))(?:{'|'.join(re.escape(n) for n in names if n)}):\s*",
                                   re.IGNORECASE)
@@ -199,6 +208,9 @@ class Brain:
         self._notes_lock = threading.Lock()
         self._warm = threading.Event()  # the prompt is in the model's cache (set when warm_up ends)
         self._warm.set()
+        # Told the tool's name when one starts and "" when it ends, on whatever thread ran it:
+        # the window shows "Working" and its orb's dot-matrix bands meanwhile (engine.py).
+        self.on_tool: Callable[[str], None] | None = None
 
     # ----- prompt building -----
 
@@ -213,14 +225,15 @@ class Brain:
 
     def _system_prompt(self) -> str:
         """The persona, with the tool rules for the tools he actually has. Built once and again
-        only when the boss turns his humor dial (tools/personality.py): it heads every request,
+        only when the user turns his humor dial (tools/personality.py): it heads every request,
         and the model caches it, so a rebuild costs one re-read of the prompt (~0.7 s)."""
         humor = _humor()
         if self._system is None or humor != self._system_humor:
             names = {t["function"]["name"] for t in self._tool_list() or []}
-            takes_humor = humor is not None and "humor" in inspect.signature(persona.system_prompt).parameters
-            self._system = (persona.system_prompt(names, self.name, humor=humor) if takes_humor
-                            else persona.system_prompt(names, self.name))
+            takes = inspect.signature(persona.system_prompt).parameters
+            extra = {"owner": self.owner} if self.owner and "owner" in takes else {}
+            self._system = (persona.system_prompt(names, self.name, humor=humor, **extra)
+                            if humor is not None and "humor" in takes else persona.system_prompt(names, self.name, **extra))
             self._system_humor = humor
         return self._system
 
@@ -258,12 +271,13 @@ class Brain:
             content = f"[Now: {datetime.now().strftime('%A %d %B %Y, %I:%M %p')}]\n{content}"
         return [{"role": "system", "content": self._system_prompt()}, *recent, {"role": "user", "content": content}]
 
-    def warm_up(self) -> None:
+    def warm_up(self, base: str | None = None) -> None:
         """Load the persona (and tool list) into the model's cache so the first real turn is fast.
         One token is enough: it's the prompt that has to be read, not a reply (a whole reply cost
-        a few tenths of a second more at startup)."""
+        a few tenths of a second more at startup). `base`: another server's, one AJ is about to
+        move to (core/placement.py)."""
         try:
-            for _ in stream_events(self.base, self._messages("hi"), self.settings, tools=self._tool_list(),
+            for _ in stream_events(base or self.base, self._messages("hi"), self.settings, tools=self._tool_list(),
                                    max_tokens=1):
                 pass
         except (OSError, ValueError):
@@ -280,7 +294,7 @@ class Brain:
     # ----- speaking -----
 
     def cut_off(self, heard: str) -> None:
-        """The boss talked over the last reply: it stays in the conversation only as far as they
+        """The user talked over the last reply: it stays in the conversation only as far as they
         heard it, marked as cut off, so the next answer takes both into account."""
         if not self.history or self.history[-1]["role"] != "assistant":
             return
@@ -294,6 +308,11 @@ class Brain:
         from any thread."""
         with self._notes_lock:
             self._notes.append(event)
+        self._actions.append((time.time(), event))
+
+    def record(self, event: str) -> None:
+        """Something he did, checked after the turn ("Quick Share is open: checked ..."),
+        for the [What you did lately] note only: nothing to tell the user. Safe from any thread."""
         self._actions.append((time.time(), event))
 
     def _look_at_laptop(self) -> None:
@@ -310,6 +329,7 @@ class Brain:
     def _ran(self, tool: str, args, result) -> None:
         """A tool ran: what it returned is a reading he may repeat, and if it worked, what it
         does may be said to be done."""
+        self.delivery.tried(tool)
         self.delivery.ground(str(result), fact=True)
         outcome = getattr(result, "outcome", "ok")
         if tool == "get_weather":
@@ -420,7 +440,7 @@ class Brain:
         return spoken
 
     def dictate(self, pieces, mouth, times, typed: str = "", capped: bool = False) -> tuple[str, str]:
-        """The boss's words after "write this down" (start_dictation) or after a WhatsApp chat
+        """The user's words after "write this down" (start_dictation) or after a WhatsApp chat
         opened: typed where he asked, never sent. `pieces`: his speech, as the VAD cut it (None
         when he typed instead). Returns (his words, what was said back).
 
@@ -460,7 +480,7 @@ class Brain:
 
     def _listen_for_message(self) -> str:
         """A WhatsApp chat just opened: his next words are the message ("it'll say, what would you
-        like to say? I would say it. And then ... write it in", the boss, 2026-10-22). Returns the
+        like to say? I would say it. And then ... write it in", the user, 2026-10-22). Returns the
         question to ask, or "" when there's no dictation to arm."""
         if self.dictation is None:
             return ""
@@ -543,16 +563,27 @@ class Brain:
             self._place = (self._place[0], self.delivery.turn)  # still talking about it
         return args
 
+    def _dispatch(self, tool: str, args):
+        """Run one tool, telling on_tool while it runs."""
+        tell = self.on_tool
+        if tell is not None:
+            tell(tool)
+        try:
+            return self.dispatcher.run(tool, args)
+        finally:
+            if tell is not None:
+                tell("")
+
     def _run_tool(self, tool: str, args, mouth, times):
         """Run the tool; if it's one that can be slow and it hasn't finished in a moment, say a
         waiting line meanwhile, so the wait doesn't sound like AJ froze."""
         if tool not in _SLOW:
-            return self.dispatcher.run(tool, args)
+            return self._dispatch(tool, args)
         done, box = threading.Event(), {}
 
         def work() -> None:
             try:
-                box["result"] = self.dispatcher.run(tool, args)
+                box["result"] = self._dispatch(tool, args)
             except BaseException as e:  # handed back to the caller below
                 box["error"] = e
             finally:
@@ -603,7 +634,7 @@ class Brain:
         if line is None:
             return None
         self._say_line(line, mouth, times)
-        return line  # the transcript shows the line exactly as the boss wrote it, directions and all
+        return line  # the transcript shows the line exactly as the user wrote it, directions and all
 
     def _hard_question(self, user_text: str, mouth, times) -> str:
         holding = self._say_line(self.lines.pick("cloud" if needs_live_info(user_text) else "thinking"), mouth, times)
@@ -633,22 +664,28 @@ class Brain:
                 # He said something was done without calling a tool (live: "Settings are now
                 # open.", "Message sent."). That was dropped; once per turn he is told nothing
                 # happened and gets to call the tool, or say he can't.
-                if calls is not None and not nudged and self.delivery.false_actions and not self.delivery.acted:
+                # Or that he can't open an app he never tried to open (live, 2026-10-23: "I can't
+                # open Claude.", with Claude installed): he is told to call open_app.
+                refused = self.delivery.false_refusals
+                if calls is not None and not nudged and (self.delivery.false_actions or refused) \
+                        and not self.delivery.acted:
                     nudged = True
                     messages = messages + [{"role": "assistant", "content": "".join(raw)},
-                                           {"role": "user", "content": _NOTHING_DONE}]
+                                           {"role": "user", "content": _NOT_TRIED if refused else _NOTHING_DONE}]
                     continue
                 break
             tool_calls = [{"id": c["id"] or f"call_{round_}_{i}", "type": "function",
                            "function": {"name": c["name"], "arguments": c["arguments"] or "{}"}}
                           for i, c in enumerate(calls)]
             messages = messages + [{"role": "assistant", "content": parts[-1] or None, "tool_calls": tool_calls}]
+            results = []
             for call in tool_calls:
                 name = call["function"]["name"]
                 if name == "type_text":  # his words for someone else: the log keeps only their length
                     self.typed_turn = len(user_text)
-                result = self.dispatcher.run(name, call["function"]["arguments"])
+                result = self._dispatch(name, call["function"]["arguments"])
                 self._ran(name, call["function"]["arguments"], result)
+                results.append((name, result))
                 content = str(result)
                 if getattr(result, "outcome", "ok") == "ok":
                     if name == "whatsapp_open_chat":
@@ -656,6 +693,11 @@ class Brain:
                     elif name in _TYPES:
                         chat_opened = False
                 messages.append({"role": "tool", "tool_call_id": call["id"], "content": content})
+            if all(name in _APP_TOOLS for name, _ in results):
+                lines = [str(r) if getattr(r, "outcome", "ok") in ("ok", "error")
+                         else self._failure_line(n, getattr(r, "outcome", "ok")) for n, r in results]
+                parts.append(self._say_line(" ".join(lines), mouth, times))
+                break
         said = " ".join(p for p in parts if p).strip()
         if chat_opened:  # the model opened a chat: he's asked what to say, and his answer is typed in
             ask = self._listen_for_message()

@@ -13,6 +13,25 @@ from aj.core.proc import bind_to_aj
 NO_WINDOW = 0x08000000
 
 
+def server_command(s: LlmSettings) -> list[str]:
+    """llama-server's command line for these settings, on the unit they name (s.backend, s.device).
+    RAM on this 16 GB laptop is the tight resource (Phase 1 measurements):
+      --load-mode none  ~0.75 GB instead of 2.8 GB (mmap keeps the model file resident)
+      --cache-ram 0     no host-RAM prompt cache; its default lets it grow to 8 GB.
+                        Each slot's KV cache on the GPU still reuses the persona prefix.
+    -np 2: slot 0 for conversation, slot 1 for background memory extraction."""
+    server = s.vulkan_server if s.backend == "vulkan" else s.server
+    layers = 0 if s.backend == "cpu" else s.gpu_layers
+    cmd = [server, "-m", s.model, "--host", "127.0.0.1", "--port", str(s.port),
+           "-ngl", str(layers), "-c", str(s.context), "-np", "2", "--jinja",
+           "--load-mode", "none", "--cache-ram", "0"]
+    if s.device and s.backend != "cpu":
+        cmd += ["--device", s.device]
+    if s.kv_cache_type and s.kv_cache_type != "f16":
+        cmd += ["-fa", "on", "-ctk", s.kv_cache_type, "-ctv", s.kv_cache_type]
+    return cmd
+
+
 class LlamaServer:
     def __init__(self, settings: LlmSettings):
         self.settings = settings
@@ -32,17 +51,10 @@ class LlamaServer:
             return
         s = self.settings
         LOG_DIR.mkdir(parents=True, exist_ok=True)
-        log = open(LOG_DIR / "llama-server.log", "w", encoding="utf-8")
-        # RAM on this 16 GB laptop is the tight resource (Phase 1 measurements):
-        #   --load-mode none  ~0.75 GB instead of 2.8 GB (mmap keeps the model file resident)
-        #   --cache-ram 0     no host-RAM prompt cache; its default lets it grow to 8 GB.
-        #                     Each slot's KV cache on the GPU still reuses the persona prefix.
-        # -np 2: slot 0 for conversation, slot 1 for background memory extraction.
-        cmd = [s.server, "-m", s.model, "--host", "127.0.0.1", "--port", str(s.port),
-               "-ngl", str(s.gpu_layers), "-c", str(s.context), "-np", "2", "--jinja",
-               "--load-mode", "none", "--cache-ram", "0"]
-        if s.kv_cache_type and s.kv_cache_type != "f16":
-            cmd += ["-fa", "on", "-ctk", s.kv_cache_type, "-ctv", s.kv_cache_type]
+        # One log per unit: while AJ moves (core/placement.py) two servers run for a moment.
+        name = "llama-server.log" if s.backend == "cuda" else f"llama-server-{s.backend}.log"
+        log = open(LOG_DIR / name, "w", encoding="utf-8")
+        cmd = server_command(s)
         self._launched = time.perf_counter()
         self.proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, creationflags=NO_WINDOW)
         bind_to_aj(self.proc)

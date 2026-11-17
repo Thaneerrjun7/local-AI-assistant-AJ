@@ -1,4 +1,4 @@
-"""The test suite never touches the boss's real data.
+"""The test suite never touches the user's real data.
 
 aj.config reads %APPDATA% once, when it is first imported, and every module that writes there
 (the app index, the audit log, the memory database, the humor setting, the logs) takes its path
@@ -29,5 +29,5 @@ if not os.environ.get("_AJ_TESTS_APPDATA"):
 TEMP_APPDATA = os.environ["_AJ_TESTS_APPDATA"]
 
 # The named events core/mic_share.py raises get names of the suite's own, so a test can never make
-# the boss's running assistant or AJ (Speak) think the other has his words.
+# the user's running assistant or AJ (Speak) think the other has his words.
 os.environ.setdefault("AJ_SHARE_NAMESPACE", f"AJTest{os.getpid()}")

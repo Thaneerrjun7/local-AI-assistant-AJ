@@ -175,7 +175,7 @@ PIECE = np.full(MIC_RATE * 6, 0.1, np.float32)  # six seconds of 'speech': up to
 
 
 class FakeVad:
-    """Silero VAD as listen.record() sees it, told which blocks have the boss talking in them."""
+    """Silero VAD as listen.record() sees it, told which blocks have the user talking in them."""
     min_silence = 0.3
 
     def __init__(self, talking):
@@ -1538,7 +1538,7 @@ class WindowTests(unittest.TestCase):
 
 
 class ByVoiceTests(unittest.TestCase):
-    """AJ (Speak) by voice (the boss, 2026-10-22): "open AJ speak", "AJ, speak", "speak window,
+    """AJ (Speak) by voice (the user, 2026-10-22): "open AJ speak", "AJ, speak", "speak window,
     listen". The window is never really started here."""
 
     def setUp(self):

@@ -90,7 +90,7 @@ SAID = {
     "am I plugged in": ("battery_status", {}),
     "How much charge does the laptop have?": ("battery_status", {}),  # both missed live, 2026-10-18
     "What is the battery status of the laptop?": ("battery_status", {}),
-    # "battery" as speech-to-text wrote it for the boss: these went to the model live (2026-10-22),
+    # "battery" as speech-to-text wrote it for the user: these went to the model live (2026-10-22),
     # which read out the RAM for the first one.
     "How much better percentages there left?": ("battery_status", {}),
     "my battery presentation right now.": ("battery_status", {}),

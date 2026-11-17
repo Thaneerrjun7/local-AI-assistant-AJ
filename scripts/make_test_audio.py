@@ -30,7 +30,7 @@ PHRASES = {
 def main() -> None:
     out = ROOT / "data" / "test_audio"
     out.mkdir(parents=True, exist_ok=True)
-    voice = PiperVoice(VoiceSettings())  # the voice he speaks with: standing in for the boss
+    voice = PiperVoice(VoiceSettings())  # the voice he speaks with: standing in for the user
     for name, text in PHRASES.items():
         samples = voice.say(text)
         pcm = (np.clip(samples, -1, 1) * 32767).astype(np.int16)

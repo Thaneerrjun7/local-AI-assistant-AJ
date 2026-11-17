@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from aj import config
 from aj.core import migrate, secrets
 
 OLD = migrate.OLD
@@ -242,6 +243,45 @@ class LogsOnlyTests(MigrateCase):
         (self.new / "apps_index.json").write_text("[]", encoding="utf-8")
         self.assertFalse(migrate.only_logs(self.new))
         self.assertIn("both", self.run_it()[0])
+
+
+class RedirectedAppDataTests(unittest.TestCase):
+    """Started from inside a packaged app, such as the Claude desktop app, a process's writes to
+    %APPDATA% land in that app's private copy (found 2026-10-23: the rename's move went there, and
+    the user's memory with it). Such a process gets its own data folder and moves nothing."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        base = Path(self.tmp.name)
+        self.appdata, self.local = base / "Roaming", base / "Local"
+        self.private = self.local / "Packages" / "Claude_x" / "LocalCache" / "Roaming"
+        self.appdata.mkdir()
+        self.private.mkdir(parents=True)
+
+    def test_writes_that_land_where_they_say_are_not_redirected(self):
+        self.assertIsNone(config.appdata_redirected(self.appdata, self.local))
+        self.assertEqual(list(self.appdata.iterdir()), [])  # the probe is gone again
+
+    def test_a_probe_that_lands_in_a_packaged_apps_copy_means_redirected(self):
+        real_open = Path.open
+
+        def as_windows_does(path, *args, **kwargs):
+            if path.parent == self.appdata:
+                path = self.private / path.name
+            return real_open(path, *args, **kwargs)
+
+        with mock.patch.object(Path, "open", as_windows_does):
+            self.assertEqual(config.appdata_redirected(self.appdata, self.local), self.private)
+
+    def test_a_folder_that_cant_be_written_is_not_called_redirected(self):
+        self.assertIsNone(config.appdata_redirected(self.appdata / "missing", self.local))
+
+    def test_nothing_moves_when_redirected(self):
+        with mock.patch.object(config, "REDIRECTED_TO", self.private):
+            notes = migrate.run(running=lambda: False)
+        self.assertEqual(len(notes), 1)
+        self.assertIn("so nothing is moved", notes[0])
 
 
 if __name__ == "__main__":

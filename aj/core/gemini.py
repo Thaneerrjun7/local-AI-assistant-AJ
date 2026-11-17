@@ -24,7 +24,7 @@ from aj.core.secrets import GEMINI, read_secret
 MODEL = "gemini-3.8-flash"
 _BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
-# What dictation asks for (core/dictation.py). The boss, 2026-10-22: "when I say something, it has
+# What dictation asks for (core/dictation.py). The user, 2026-10-22: "when I say something, it has
 # to get it accurately, exactly the way I want it". So: his words as said, nothing added, and the
 # names in his life spelled the way he says them.
 TRANSCRIBE_RULES = """You are a speech-to-text engine. Write down exactly what the speaker says, word for word.

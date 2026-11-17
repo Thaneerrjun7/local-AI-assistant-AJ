@@ -1,6 +1,6 @@
-"""Listening for AJ (Speak): the microphone, and Silero VAD to tell when the boss has stopped.
+"""Listening for AJ (Speak): the microphone, and Silero VAD to tell when the user has stopped.
 
-Nothing here tries to understand words. The boss, 2026-10-22: "It can take longer, but ... I want it
+Nothing here tries to understand words. The user, 2026-10-22: "It can take longer, but ... I want it
 to be accurate", so Gemini writes the words down (core/dictation.transcribe) and this only decides
 when to stop recording. Silero VAD (the voice-activity model the assistant listens with too, about
 2 MB) cuts the speech into pieces at every 0.3 s of quiet and drops the quiet. People pause in the

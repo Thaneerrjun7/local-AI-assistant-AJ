@@ -1,7 +1,7 @@
-"""Dictation tools: what the boss says is typed exactly where his cursor is, in any app. The work
+"""Dictation tools: what the user says is typed exactly where his cursor is, in any app. The work
 is in core/dictation.py; these are the calls the fast path and the model make.
 
-The boss, 2026-10-22: "I want another tool where i tell computer write this down for me on
+The user, 2026-10-22: "I want another tool where i tell computer write this down for me on
 whatsapp and then whatever i say gets written down in text so i dont have to type it." Two ways in:
 - "write this down", "type this for me", "take dictation" (no words yet): start_dictation, a short
   "Go ahead.", and his NEXT words are typed (the pipeline keeps them as audio for Gemini).
@@ -17,7 +17,7 @@ before) and "type of ..." questions ("what type of laptop is this").
 "Open AJ speak", "open the speak window" (open_speak): the AJ (Speak) window, the small
 speech-to-text window (aj/speak), started with the project's pythonw. It runs one at a time, so a
 second call only shows it. "AJ, speak" and "speak window, listen" start it listening at once
-(--listen). The boss, 2026-10-22: AJ (Speak) by voice.
+(--listen). The user, 2026-10-22: AJ (Speak) by voice.
 
 Each tool hands core the dispatcher's cancel event (registry.cancel_event), so a call the
 dispatcher gave up on stops before it types or arms anything late; and type_text's words are
@@ -171,7 +171,7 @@ def _speak(m: re.Match) -> dict:
 
 
 INTENTS: list[tuple[str, str, Callable[[re.Match], dict | None]]] = [
-    # AJ (Speak) by voice (the boss, 2026-10-22). "AJ, speak" reaches here as "speak" (the name
+    # AJ (Speak) by voice (the user, 2026-10-22). "AJ, speak" reaches here as "speak" (the name
     # comes off first), and means: open it and listen.
     (r"speak", "open_speak", lambda m: {"listen": True}),
     (rf"(?:open|launch|start|show|bring up|pull up|run)(?: up)? {_SPEAK}{_LISTEN}", "open_speak", _speak),

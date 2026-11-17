@@ -1,35 +1,44 @@
-"""AJ's window: a status line, a big mic button, a Close button, the conversation, and a
-box to type in.
+"""AJ's window: the orb, a status line, a mic button, a Close button, the conversation, and a
+box to type in. Drawn by Qt Quick (qml/Main.qml, qml/Face.qml) with the look of
+docs/UI_REDESIGN_PLAN.md: liquid glass on a dark ember background, the neural orb, Inter.
 
-It does nothing on its own (no timers, no animation): everything it shows arrives as a
-signal from the engine thread, so it sleeps while AJ is idle. The one thing that ticks is
-the text box's caret, and Qt stops that whenever the window isn't in front. Closing it, by the Close
-button or the title-bar X, turns AJ off; the window stays up saying "Turning off..."
-until the engine has said goodbye and let go of everything, then closes for real.
+This is the window as the rest of AJ sees it, with the same methods and signals the widget
+window had (set_status, add_turn, confirm, bring_to_front, closing, closed and the rest), so
+app.py, the tray and the engine use it unchanged. Python sets the QML's properties when the
+engine reports something and answers its three signals (mic, send, close). Everything that moves
+runs in Qt's render thread and the QML: Python never runs per frame, and nothing is drawn while
+the window is hidden. Closing it, by the Close button or the title-bar X, turns AJ off; the
+window stays up saying "Turning off..." until the engine has said goodbye and let go of
+everything, then closes for real.
 
 Sleep mode (2026-10-22): asleep, the window hides (the tray icon stays, ui/tray.py) and comes
-back when it wakes. Woken by voice it comes back WITHOUT taking the keyboard: the boss may be in
+back when it wakes. Woken by voice it comes back WITHOUT taking the keyboard: the user may be in
 WhatsApp about to dictate, and dictation types into the window that was in front. Woken from
 the tray or the shortcut it comes to the front, as he asked for it.
 """
 from typing import Protocol
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QCloseEvent, QFont
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QVBoxLayout, QWidget
+from PyQt6.QtCore import QObject, QSize, Qt, QTimer, QUrl, pyqtSignal
+from PyQt6.QtGui import QColor
+from PyQt6.QtQuick import QQuickView
+from PyQt6.QtWidgets import QMessageBox
 
 from aj.core.pipeline import ASLEEP_STATUSES, Status
+from aj.ui import native
 from aj.ui import status as looks
-from aj.ui.mic_button import MicButton
-from aj.ui.transcript import Transcript
+from aj.ui.conversation import Conversation
+from aj.ui.levels import Follower
 
 DISCLAIMER = "⚠ Some lines are quotes from fiction, said in character, not real intent."
+MAIN_QML = native.QML_DIR / "Main.qml"
+LEVEL_EVERY_MS = 33  # the voice levels, 30 times a second (the orb smooths between readings)
 
 
 class Controls(Protocol):
     """The engine as the window sees it. All three are called on the UI thread and must not block.
-    An engine may also have sleep() and wake() (sleep mode, from the tray); the window uses them
-    when they're there."""
+    An engine may also have sleep() and wake() (sleep mode, from the tray), and voice_level() and
+    mic_level() (0..1, how loud AJ's voice and yours are right now, for the orb); the window uses
+    them when they're there."""
 
     def set_listening(self, on: bool) -> None: ...
 
@@ -38,7 +47,7 @@ class Controls(Protocol):
     def turn_off(self) -> None: ...
 
 
-class AJWindow(QWidget):
+class AJWindow(QObject):
     closing = pyqtSignal(bool)  # emitted once, when turning off begins; True if still loading
     closed = pyqtSignal()       # the window really closed: AJ is off (the app quits on it)
 
@@ -49,66 +58,92 @@ class AJWindow(QWidget):
         self._closing = False      # turning off has begun
         self._engine_done = False  # the engine thread has ended: closing may really close now
         self._failed = False
+        self._mic_on = True
+        self._working = ""          # the tool running, if any
+        self._tinted = False
+        self._box: QMessageBox | None = None
 
-        name = getattr(getattr(engine, "settings", None), "name", "Computer")  # the assistant's name (Settings.name)
-        self.setObjectName("root")
-        self.setWindowTitle(name)
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)  # let the stylesheet paint the background
-        self.resize(420, 640)
-        self.setMinimumSize(340, 520)
+        self.name = getattr(getattr(engine, "settings", None), "name", "AJ")  # the assistant's name (Settings.name)
+        self.conversation = Conversation(self.name, self)
+        self.view = QQuickView()
+        self.view.setTitle(self.name)
+        self.view.setColor(QColor(native.BASE))
+        self.view.setResizeMode(QQuickView.ResizeMode.SizeRootObjectToView)
+        self.view.setMinimumSize(QSize(340, 560))
+        self.view.rootContext().setContextProperty("conversation", self.conversation)
+        self.view.setSource(QUrl.fromLocalFile(str(MAIN_QML)))
+        if self.view.status() == QQuickView.Status.Error:
+            raise RuntimeError("the window's QML didn't load:\n" + "\n".join(e.toString() for e in self.view.errors()))
+        self.view.resize(420, 720)  # the orb above, room for the conversation below
 
-        title = QLabel("AJ")
-        title.setObjectName("title")
-        title_font = QFont(title.font())
-        title_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 5)
-        title.setFont(title_font)
-        self.close_button = QPushButton("Close")
-        self.close_button.setObjectName("close")
-        self.close_button.setToolTip(f"Turn {name} off and close")
-        self.close_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.close_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # a stray Space or Enter can't turn him off
-        self.close_button.clicked.connect(self.close)
+        self.root = self.view.rootObject()
+        self.root.setProperty("name", self.name)
+        self.root.setProperty("footnote", DISCLAIMER)  # the user asked for this (2026-10-06)
+        native.call(self.root, "setFont", native.load_font())
+        native.call(self.root, "setAccessibility", *native.windows_prefers_less())
+        native.call(self.root, "loadTuning", native.saved_tuning())  # the lab's tuning, if saved
+        if native.software_rendering():
+            native.call(self.root, "setSoftware", True)
+        self.root.micClicked.connect(self._mic_toggled)
+        self.root.sent.connect(self._send_typed)
+        self.root.closeClicked.connect(self.close)
+        self.root.closeRefused.connect(self._close_refused)
+        self.root.closedForReal.connect(self.closed.emit)
+        # Python takes no part in the window's events (see Main.qml, `mayClose`), nor in Qt's
+        # render thread: whether Qt fell back to drawing without a GPU is looked at once, a
+        # moment after the window first shows.
+        QTimer.singleShot(1500, self._check_renderer)
 
-        self.status_label = QLabel()
-        self.status_label.setObjectName("status")
-        self.status_label.setTextFormat(Qt.TextFormat.RichText)
-
-        self.mic = MicButton()
-        self.mic.toggled.connect(self._mic_toggled)
-        self.mic_caption = QLabel()
-        self.mic_caption.setObjectName("caption")
-        self.mic_caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.mic_caption.setMinimumHeight(20)  # blank while loading; don't let the layout jump
-
-        self.transcript = Transcript()
-        self.entry = QLineEdit()
-        self.entry.setObjectName("entry")
-        self.entry.setPlaceholderText(f"Type to {name}, Enter to send")
-        self.entry.returnPressed.connect(self._send_typed)
-        # The user asked for this (2026-10-06): his menace is a performance, and the window says so.
-        self.disclaimer = QLabel(DISCLAIMER)
-        self.disclaimer.setObjectName("disclaimer")
-        self.disclaimer.setWordWrap(True)
-        self.disclaimer.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        header = QHBoxLayout()
-        header.addWidget(title)
-        header.addStretch()
-        header.addWidget(self.close_button)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 16, 20, 20)
-        layout.setSpacing(10)
-        layout.addLayout(header)
-        layout.addWidget(self.status_label)
-        layout.addSpacing(6)
-        layout.addWidget(self.mic, alignment=Qt.AlignmentFlag.AlignHCenter)
-        layout.addWidget(self.mic_caption)
-        layout.addSpacing(6)
-        layout.addWidget(self.transcript, stretch=1)
-        layout.addWidget(self.entry)
-        layout.addWidget(self.disclaimer)
-
+        # The voice levels, read only while the orb moves with a voice (hearing, speaking,
+        # dictating): one small Python call 30 times a second then, none at all otherwise.
+        self._voice, self._mic = Follower(), Follower()
+        self._levels = QTimer(self)
+        self._levels.setInterval(LEVEL_EVERY_MS)
+        self._levels.timeout.connect(self._read_levels)
         self._show_status(Status.LOADING)
+
+    @property
+    def _engine_done(self) -> bool:
+        """The engine thread has ended: a close may really close now (Main.qml, `mayClose`)."""
+        return self._done
+
+    @_engine_done.setter
+    def _engine_done(self, done: bool) -> None:
+        self._done = done
+        if hasattr(self, "root"):
+            self.root.setProperty("mayClose", done)
+
+    # ---- the window, as a widget would have it ----
+
+    def show(self) -> None:
+        self._tint()
+        self.view.show()
+
+    def hide(self) -> None:
+        self.view.hide()
+
+    def close(self) -> bool:
+        return self.view.close()
+
+    def showNormal(self) -> None:
+        self._tint()
+        self.view.showNormal()
+
+    def raise_(self) -> None:
+        self.view.raise_()
+
+    def activateWindow(self) -> None:
+        self.view.requestActivate()
+
+    def isVisible(self) -> bool:
+        return self.view.isVisible()
+
+    def isMinimized(self) -> bool:
+        return bool(self.view.windowStates() & Qt.WindowState.WindowMinimized)
+
+    def deleteLater(self) -> None:
+        self.view.deleteLater()
+        super().deleteLater()
 
     # ---- engine -> window (connected to Bridge signals, so always on the UI thread) ----
 
@@ -125,17 +160,26 @@ class AJWindow(QWidget):
                 # tell him: the review of 2026-10-22): back, keyboard left alone.
                 self.show_quietly()
 
+    def set_working(self, tool: str) -> None:
+        """A tool started (its name) or finished (""): while one runs, Thinking shows as Working."""
+        self._working = tool
+        if not self._closing and not self._failed:
+            self._show_status(self.status)
+
     def add_heard(self, text: str) -> None:
-        self.transcript.add_you(text)
+        self.conversation.add_you(text)
 
     def add_turn(self, reply: str, latency: str) -> None:
-        self.transcript.add_aj(reply, latency)
+        self.conversation.add_aj(reply, latency)
 
     def show_error(self, message: str) -> None:
         self._failed = True
-        self.transcript.add_error(message)
-        label, colour = looks.ERROR
-        self.status_label.setText(f'<span style="color:{colour}">●</span>&nbsp; {label}')
+        self._follow_levels(False)
+        self.conversation.add_error(message)
+        label, _ = looks.ERROR
+        self.root.setProperty("statusText", label)
+        self.root.setProperty("statusTone", looks.ERROR_TONE)
+        self.root.setProperty("mode", looks.ERROR_MODE)
         self._sync_controls()
 
     def engine_finished(self) -> None:
@@ -147,9 +191,11 @@ class AJWindow(QWidget):
     def confirm(self, question: str) -> bool:
         """A risky action (delete, move, close an app) needs a clear yes. Anything else is no."""
         self.bring_to_front()
-        box = QMessageBox(QMessageBox.Icon.Question, "AJ needs a yes", question,
-                          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, self)
+        box = QMessageBox(QMessageBox.Icon.Question, f"{self.name} needs a yes", question,
+                          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         box.setDefaultButton(QMessageBox.StandardButton.No)
+        box.winId()  # so it has a native window to keep over ours
+        box.windowHandle().setTransientParent(self.view)
         self._box = box
         try:
             return box.exec() == QMessageBox.StandardButton.Yes
@@ -158,9 +204,8 @@ class AJWindow(QWidget):
 
     def close_confirm(self) -> None:
         """The question was settled without a click (a spoken answer, or no answer in time)."""
-        box = getattr(self, "_box", None)
-        if box is not None:
-            box.done(QMessageBox.StandardButton.No)
+        if self._box is not None:
+            self._box.done(QMessageBox.StandardButton.No)
 
     def bring_to_front(self) -> None:
         """The shortcut was clicked while AJ is on (or the tray icon): asleep, that wakes him."""
@@ -175,17 +220,18 @@ class AJWindow(QWidget):
 
     def show_quietly(self) -> None:
         """Back on screen without taking the keyboard from the window in front (Windows shows it
-        with SW_SHOWNOACTIVATE), so dictation still types where the boss was."""
+        with SW_SHOWNOACTIVATE), so dictation still types where the user was. The property is
+        the one QWidget's WA_ShowWithoutActivating sets; Qt's Windows plugin reads it on show."""
         if self.isVisible() and not self.isMinimized():
             return
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.view.setProperty("_q_showWithoutActivating", True)
         try:
             if self.isMinimized():
                 self.showNormal()
             else:
                 self.show()
         finally:
-            self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, False)
+            self.view.setProperty("_q_showWithoutActivating", False)
 
     def wake_up(self) -> None:
         """Out of sleep mode (the tray's Wake up)."""
@@ -201,22 +247,19 @@ class AJWindow(QWidget):
 
     # ---- window -> engine ----
 
-    def _mic_toggled(self, on: bool) -> None:
-        self.engine.set_listening(on)
+    def _mic_toggled(self) -> None:
+        self._mic_on = not self._mic_on
+        self.engine.set_listening(self._mic_on)
         self._sync_controls()
 
-    def _send_typed(self) -> None:
-        text = self.entry.text().strip()
+    def _send_typed(self, text: str) -> None:
+        text = text.strip()
         if text:
             self.engine.ask(text)
-            self.entry.clear()
 
-    def closeEvent(self, event: QCloseEvent) -> None:
-        if self._engine_done:
-            event.accept()
-            self.closed.emit()
-            return
-        event.ignore()  # stay up until the engine has shut down; engine_finished() closes us
+    def _close_refused(self) -> None:
+        """A close before the engine has ended: turn AJ off. The window stays up until
+        engine_finished(), which lets the next close through."""
         if not self._closing:
             self.engine.turn_off()
             self._begin_closing(still_loading=self.status == Status.LOADING)
@@ -232,17 +275,48 @@ class AJWindow(QWidget):
 
     def _show_status(self, status: Status) -> None:
         self.status = status
-        label, colour = looks.look(status)
-        self.status_label.setText(f'<span style="color:{colour}">●</span>&nbsp; {label}')
+        label, _ = looks.look(status)
+        mode = looks.orb_mode(status)
+        if self._working and status == Status.THINKING:
+            label, mode = looks.working_text(self._working), looks.WORKING_MODE
+        self.root.setProperty("statusText", label)
+        self.root.setProperty("statusTone", looks.tone(status))
+        self.root.setProperty("mode", mode)
+        self._follow_levels(status in looks.LEVEL_STATUSES)
         self._sync_controls()
+
+    def _follow_levels(self, on: bool) -> None:
+        if on and not self._levels.isActive() and hasattr(self.engine, "voice_level"):
+            self._levels.start()
+        elif not on and self._levels.isActive():
+            self._levels.stop()
+            self._voice.reset()
+            self._mic.reset()
+            self.root.setProperty("voiceLevel", 0.0)
+            self.root.setProperty("micLevel", 0.0)
+
+    def _read_levels(self) -> None:
+        dt = LEVEL_EVERY_MS / 1000
+        try:
+            voice = self._voice.step(self.engine.voice_level(), dt)
+            mic = self._mic.step(self.engine.mic_level(), dt) if hasattr(self.engine, "mic_level") else 0.0
+        except Exception:  # a level is only for show: never let it break the window
+            return
+        self.root.setProperty("voiceLevel", voice)
+        self.root.setProperty("micLevel", mic)
 
     def _sync_controls(self) -> None:
         ready = self.status not in looks.NOT_READY and not self._failed and not self._closing
-        just_ready = ready and not self.entry.isEnabled()
-        self.mic.setEnabled(ready)
-        self.entry.setEnabled(ready)
-        if just_ready:  # loading is over: typing works straight away, without a click
-            self.entry.setFocus()
-        self.close_button.setEnabled(not self._closing)
-        self.mic.setToolTip(("Stop listening" if self.mic.isChecked() else "Start listening") if ready else "")
-        self.mic_caption.setText(looks.mic_caption(self.mic.isChecked()) if ready else "")
+        self.root.setProperty("ready", ready)
+        self.root.setProperty("micOn", self._mic_on)
+        self.root.setProperty("closeEnabled", not self._closing)
+        self.root.setProperty("micCaption", looks.mic_caption(self._mic_on) if ready else "")
+
+    def _tint(self) -> None:
+        if not self._tinted:
+            native.tint_title_bar(self.view)
+            self._tinted = True
+
+    def _check_renderer(self) -> None:
+        if native.software_rendering(self.view):
+            native.call(self.root, "setSoftware", True)

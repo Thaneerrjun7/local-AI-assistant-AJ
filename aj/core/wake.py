@@ -1,6 +1,6 @@
 """Sleep mode and the wake words: the assistant can sleep, and wakes when it hears its name.
 
-The boss, 2026-10-22: the assistant answers to "AJ" and to "Computer" ("hey AJ or computer, then
+The user, 2026-10-22: the assistant answers to "AJ" and to "Computer" ("hey AJ or computer, then
 it should respond either way"). Asleep, it hides in the tray and answers nothing until an
 utterance starts with one of them; "Hey AJ, open WhatsApp" wakes it and runs the command in the
 same breath. "Go back to sleep" (and the like) puts it to sleep again. Listening while asleep is
@@ -23,7 +23,7 @@ ordinary talk in the room from waking it:
 
 How Parakeet writes the names, measured by scripts/check_wake_words.py (2026-10-22: the Piper
 voice saying each phrase at three speeds, two noise settings and three pitches, through the
-real VAD, as the boss's words go; 18 renderings of each phrase):
+real VAD, as the user's words go; 18 renderings of each phrase):
 - "AJ": "AJ", "Aj", "A J", "A.J.", "A Jay"; after "hey" also "Jay" and "J" ("Hey, Jay.",
   "Hey J.", "Hey hey Jay"); now and then "OJ" ("OJ turn off.", "A OJ, open WhatsApp"),
   "AAJ" ("AAJ, Volume 30"), "I J" ("I J Sleep.") and, after "hey", "A G" ("A A G type.").
@@ -230,7 +230,10 @@ _SLEEP = re.compile(
     r"|(?:take|have|go take|go have) a nap|nap(?: time)?"
     r"|(?:go (?:to |into )?|enter |switch to )?stand ?by(?: mode)?"
     r"|good ?night"
-    r"|(?:bed|nap) ?time|go to bed")
+    r"|(?:bed|nap) ?time|go to bed"
+    # 2026-11-18, the user: going to sleep means going into the tray, so the tray itself works too.
+    r"|(?:go|get|head|move)(?: back)? (?:to|into|in) (?:the |your )?(?:system )?tray"
+    r"|hide(?: yourself| away)?|minimi[sz]e yourself")
 
 
 def _plain(text: str) -> str:
@@ -333,7 +336,7 @@ class Gate:
 
     @staticmethod
     def hears_wake_words(on_ac: bool | None) -> bool:
-        """Listening for the wake words while asleep is for mains power only (the boss,
+        """Listening for the wake words while asleep is for mains power only (the user,
         2026-10-22: on battery "this feature should not be available at all"). `on_ac` is
         core/power_source.on_ac_power(): a machine with no battery at all already reads True,
         so None means Windows couldn't say, and then it doesn't listen: his rule, kept even

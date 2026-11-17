@@ -4,7 +4,7 @@ One small JSON file in the data folder. It is only a convenience, so every read 
 soft: a missing, unreadable or hand-edited file means the defaults, and a file that can't be
 written means the position is forgotten, never a crash and never a window stuck off-screen.
 
-The boss, 2026-10-22: the window is draggable and its position is remembered. A screen can go away
+The user, 2026-10-22: the window is draggable and its position is remembered. A screen can go away
 (a monitor unplugged, a different resolution), so a saved position is used only if enough of the
 window would still be on a screen; otherwise it goes back to the corner.
 """

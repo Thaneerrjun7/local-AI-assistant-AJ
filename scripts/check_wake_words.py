@@ -1,6 +1,6 @@
 """Does Parakeet hear the wake words, and does ordinary talk stay asleep? The Piper voice says
 each phrase (three speeds, two noise settings, three pitches: nine slightly different speakers
-twice over), the audio goes through the same VAD and Parakeet that hear the boss, and what
+twice over), the audio goes through the same VAD and Parakeet that hear the user, and what
 comes back is checked with core/wake.py exactly as the pipeline will check it.
 
 Four groups:

@@ -1,21 +1,22 @@
 """AJ's lines: signature lines only when they fit, rotation without back-to-back repeats,
-a memory of what was said that survives a restart, and the code's own lines in TARS's manner
-(persona v6, 2026-10-22)."""
+a memory of what was said that survives a restart, and the code's own lines in JARVIS's manner
+(persona v7, 2026-11-18)."""
 import re
 import json
 import random
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from aj import lines
 from aj.core.chunker import strip_marks
 from aj.lines import POOLS, SIGNATURES, Lines, used_in
 
 BY_KEY = {s.key: s for s in SIGNATURES}
-DREAM = BY_KEY["dream"].text  # whichever wording is installed: the boss's own or the stand-in
+DREAM = BY_KEY["dream"].text  # whichever wording is installed: the user's own or the stand-in
 
-# What the boss might say that each signature line fits.
+# What the user might say that each signature line fits.
 FITS = {
     "rich": "should I lend my friend money?",
     "stop_me": "one day someone will unplug you",
@@ -57,7 +58,7 @@ def bank(path=None, seed=1, clock=None, rng=None) -> Lines:
 
 
 class SignatureFitTests(unittest.TestCase):
-    def test_the_bosss_own_lines_are_used_exactly_as_written(self):
+    def test_the_users_own_lines_are_used_exactly_as_written(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "signature_lines.json"
             own = {"naive": {"text": "YOU'RE SO NA\u00cfVE\u2026 [singing] Really!"}, "rich": {"text": "Mine.", "part": "Mi"}}
@@ -66,6 +67,22 @@ class SignatureFitTests(unittest.TestCase):
         self.assertEqual(used["naive"].text, own["naive"]["text"])
         self.assertEqual((used["rich"].text, used["rich"].part), ("Mine.", "Mi"))
         self.assertEqual(used["dread"], next(s for s in lines._SIGNATURES if s.key == "dread"))  # stand-in kept
+
+    def test_the_file_can_add_lines_of_its_own(self):
+        """2026-11-18: the user's own picks for the new character, each with the topics it fits."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "signature_lines.json"
+            own = {"at_work": {"text": "Working on it, sir.", "fits": r"(are you working|any progress)\b",
+                               "chance": 0.9},
+                   "broken": {"text": "x", "fits": "(unclosed"},
+                   "no_topic": {"text": "y"}}
+            path.write_text(json.dumps(own), encoding="utf-8")
+            used = {s.key: s for s in lines.with_local_lines(lines._SIGNATURES, path)}
+        self.assertEqual((used["at_work"].text, used["at_work"].chance), ("Working on it, sir.", 0.9))
+        self.assertTrue(re.search(used["at_work"].fits, "any progress"))
+        self.assertNotIn("broken", used)    # a regex that doesn't compile is left out
+        self.assertNotIn("no_topic", used)  # a new line needs the topics it fits
+        self.assertEqual(len(used), len(lines._SIGNATURES) + 1)
 
     def test_a_partial_use_is_the_lines_own_words(self):
         for s in SIGNATURES:
@@ -155,12 +172,14 @@ class RotationTests(unittest.TestCase):
             self.assertEqual(set(picked), set(options), pool)
 
     def test_a_signature_line_in_a_pool_counts_as_used(self):
+        # Since persona v7 no pool holds one, but a pool that does still marks the line as used.
         b = bank()
-        b.used = {f"greeting:{line}": 1.0 for line in POOLS["greeting"]}
-        b.used[f"greeting:{DREAM}"] = 0.0
-        b.rng = random.Random(0)
-        while b.pick("greeting") != DREAM:
-            pass
+        with mock.patch.dict(POOLS, {"test": [DREAM, "Hello, sir."]}):
+            b.used = {"test:Hello, sir.": 1.0}
+            b.rng = random.Random(0)
+            for _ in range(20):
+                if b.pick("test") == DREAM:
+                    break
         self.assertIn("dream", b.used)
 
     def test_memory_survives_a_restart(self):
@@ -179,11 +198,20 @@ class RotationTests(unittest.TestCase):
 
 
 class VoiceTests(unittest.TestCase):
-    """The pools speak like a crew member reporting: short, level, no term of address, none of
-    the v5 wording (the boss, 2026-10-22: erase all of it)."""
+    """The pools speak in JARVIS's manner (persona v7, 2026-11-18): short and composed, with "sir"
+    or "boss", and none of the v5 wording (the user, 2026-10-22: erase all of it)."""
+
+    def test_they_call_him_sir_or_boss(self):
+        for pool, options in POOLS.items():
+            for line in options:
+                self.assertRegex(line, r"\b(sir|boss)\b|Say yes or no", f"{pool}: {line}")
+
+    def test_hello_sir_on_two_claps(self):
+        self.assertIn("Hello, sir.", POOLS["clap"])
+        self.assertTrue(all(line.startswith("Hello") for line in POOLS["clap"]))
 
     def test_every_line_in_the_new_manner(self):
-        theirs = {s.text for s in SIGNATURES}  # the boss's own lines stay exactly as he wrote them
+        theirs = {s.text for s in SIGNATURES}  # the user's own lines stay exactly as he wrote them
         for pool, options in POOLS.items():
             for line in options:
                 if line in theirs:
@@ -206,8 +234,8 @@ class VoiceTests(unittest.TestCase):
         self.assertIn(b.waiting_line("open_app"), POOLS["wait"])
 
     def test_wake_and_sleep(self):
-        # sleep mode (2026-10-22): a word or two when woken by name, a short line going to sleep
-        self.assertTrue(all(len(line.split()) <= 2 for line in POOLS["wake"]))
+        # sleep mode (2026-10-22): a few words when woken by name, a short line going to sleep
+        self.assertTrue(all(len(line.split()) <= 3 for line in POOLS["wake"]))
         self.assertTrue(3 <= len(POOLS["wake"]) <= 4 and 3 <= len(POOLS["sleep"]) <= 4)
         self.assertIn(bank().pick("sleep"), POOLS["sleep"])
 
@@ -215,7 +243,7 @@ class VoiceTests(unittest.TestCase):
 class UsedInTests(unittest.TestCase):
     def test_whole_or_most_of_the_line(self):
         self.assertTrue(used_in("Silence isn't the same thing as peace.",
-                                "Hm. Silence isn't the same thing as peace, boss."))
+                                "Hm. Silence isn't the same thing as peace, human."))
         self.assertFalse(used_in("Silence isn't the same thing as peace.", "Fine. Quiet it is."))
 
 

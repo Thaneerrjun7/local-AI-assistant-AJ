@@ -1,6 +1,6 @@
-"""AJ (Speak): a small floating window that types what the boss says, wherever his cursor is.
+"""AJ (Speak): a small floating window that types what the user says, wherever his cursor is.
 
-The boss, 2026-10-22: "The speech to text tool should be available for me to use anywhere, meaning
+The user, 2026-10-22: "The speech to text tool should be available for me to use anywhere, meaning
 anywhere where I can type anything, I should be able to activate speech to text. So I want a
 separate small window for speech to text. That can be used as a tool on its own... I want it created
 and put on my desktop. It should be called AJ (speak)." And: "This tool can use Gemini. It can take

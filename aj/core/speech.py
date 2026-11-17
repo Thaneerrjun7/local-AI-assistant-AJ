@@ -54,6 +54,30 @@ MID_SENTENCE_GAP = 0.12  # after a chunk cut mid-sentence: a beat, not a full st
 _ENDS_SENTENCE = re.compile(r"[.!?…][\"')\]]*$")
 
 
+def hotwords_file(model_dir: Path, words: list[str]) -> Path | None:
+    """The files Parakeet needs to listen for `words` (settings.voice.hotwords), written next to
+    the model: the words, one a line, and bpe.vocab, which sherpa-onnx uses to split them into
+    the model's own pieces. The model comes without one, so it is made from tokens.txt, earlier
+    pieces scoring higher. None when there are no words or the files can't be written: then
+    decoding is plain greedy search, as before 2026-10-23. Beam search with the words costs
+    ~18 ms a turn (measured: 105 ms median against 123 ms)."""
+    words = [" ".join(w.split()) for w in words if w and w.strip()]
+    if not words:
+        return None
+    vocab, hints = model_dir / "bpe.vocab", model_dir / "aj-hotwords.txt"
+    try:
+        if not vocab.exists():
+            pieces = (model_dir / "tokens.txt").read_text(encoding="utf-8").splitlines()
+            vocab.write_text("".join(f"{line.rsplit(' ', 1)[0]}\t{-i / 1000:.3f}\n" for i, line in enumerate(pieces)),
+                             encoding="utf-8")
+        text = "\n".join(words) + "\n"
+        if not hints.exists() or hints.read_text(encoding="utf-8") != text:
+            hints.write_text(text, encoding="utf-8")
+    except OSError:
+        return None
+    return hints
+
+
 def looks_unfinished(text: str) -> bool:
     text = text.strip()
     if text.endswith("?"):
@@ -73,10 +97,14 @@ class Ears:
             sample_rate=MIC_RATE, num_threads=1)
         self.vad = so.VoiceActivityDetector(vad_cfg, buffer_size_in_seconds=60)
         d = Path(s.stt_dir)
+        hints = hotwords_file(d, s.hotwords)
+        biased = {} if hints is None else dict(
+            decoding_method="modified_beam_search", max_active_paths=4, hotwords_file=str(hints),
+            hotwords_score=s.hotwords_score, modeling_unit="bpe", bpe_vocab=str(d / "bpe.vocab"))
         self.recognizer = so.OfflineRecognizer.from_transducer(
             encoder=str(d / "encoder.int8.onnx"), decoder=str(d / "decoder.int8.onnx"),
             joiner=str(d / "joiner.int8.onnx"), tokens=str(d / "tokens.txt"),
-            num_threads=s.stt_threads, model_type="nemo_transducer", provider=s.stt_provider)
+            num_threads=s.stt_threads, model_type="nemo_transducer", provider=s.stt_provider, **biased)
         # Dictation (2026-10-22) can transcribe on a tool thread while barge-in transcribes on the
         # loop thread; one decode at a time on the shared recognizer.
         self._decoding = threading.Lock()
@@ -283,7 +311,7 @@ class Voice:
 class PiperVoice(Voice):
     """A Piper (VITS) voice through sherpa-onnx, on the CPU, so no graphics memory at all.
 
-    Tried at the boss's request (2026-10-19) after asking for a voice with almost no drain. Measured:
+    Tried at the user's request (2026-10-19) after asking for a voice with almost no drain. Measured:
     ready in under 2 s (Kokoro's GPU start took 4 s), about 0.1 s for a short line and 0.3-0.5 s
     for a long one, 25 times faster than it speaks. Everything but the engine is Voice's: real
     pauses, cached phrases, a chuckle."""

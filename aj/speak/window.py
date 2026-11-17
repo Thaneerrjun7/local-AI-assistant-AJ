@@ -2,7 +2,7 @@
 while it listens, a Polite switch and a small x.
 
 The one thing it must get right: clicking it must NOT take the focus from the text box he is typing
-in. The boss, 2026-10-22: "anywhere where I can type anything, I should be able to activate speech
+in. The user, 2026-10-22: "anywhere where I can type anything, I should be able to activate speech
 to text." If this window took the focus, the cursor would leave his message, UI Automation would see
 this window's buttons instead of his text box, and the typing would have nowhere to go. So it is a
 non-activating tool window, three ways over:

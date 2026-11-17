@@ -1,6 +1,6 @@
 """The wake listener: say "Hey AJ" or "Computer" while AJ is switched off, and AJ starts.
 
-The boss, 2026-10-22: "when it is plugged in, even if it's turned off, can I have the mic turned
+The user, 2026-10-22: "when it is plugged in, even if it's turned off, can I have the mic turned
 on at all times listening to the call words of 'Hey AJ' or 'AJ' or 'computer' or 'Hey
 computer'? If I say those words, it has to activate the AJ program." And: "When unplugged, it
 should not be activated or online. This feature should not be available at all."

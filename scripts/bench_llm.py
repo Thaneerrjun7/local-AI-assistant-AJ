@@ -1,16 +1,29 @@
 """Phase 1 benchmark: one model, served by llama-server, measured on this laptop.
 
 Sections:
-  latency  time to first token and to first sentence, cold vs cached prompt
+  latency  time to first token and to first sentence, cold vs cached prompt (after 3 warm-ups)
+  prefill  AJ's real first prompt (the persona and every tool, ~7,600 tokens) read from scratch:
+           what AJ waits for before he can answer at all after starting (2026-10-26: 577.7 s
+           on the CPU, on battery)
   tools    20 scripted laptop commands x 3 seeds: right tool, valid args, no invented tools
   persona  10 prompts plus an 8-turn drift check; replies saved for blind rating
   json     50 memory-extraction chats, with and without a JSON-schema grammar
-It also records load time, peak VRAM and llama-server RAM.
+It also records load time, VRAM, llama-server RAM, system RAM and, on battery, the draw in watts.
+
+Where it runs (docs/HARDWARE_AWARE_INFERENCE_PLAN.md, Phase 1):
+  --backend cuda    the CUDA build on the RTX 4050 (the default, as AJ runs)
+  --backend vulkan  the Vulkan build (scripts\fetch_models.ps1 -Vulkan) with --device Vulkan0 for
+                    the Radeon 780M; its memory is borrowed from system RAM, so system_ram_mb is the cost
+  --backend cpu     the CUDA build with no layers on a GPU
+Graphics memory comes from nvidia-smi, which wakes the RTX 4050, so it is read only when the run
+uses that card and the laptop is plugged in (unplugged, the card is switched off: Phase 0).
 
 Usage:
   python scripts/bench_llm.py --name qwen3-4b --model models/llm/Qwen3-4B-Instruct-2507-Q4_K_M.gguf
-  python scripts/bench_llm.py --name qwen3-4b-cpu --model ... --ngl 0
-Results go to data/bench/<name>.json; scripts/bench_report.py compares them.
+  python scripts/bench_llm.py --name qwen3-4b-cpu --model ... --backend cpu
+  python scripts/bench_llm.py --name qwen3-4b-780m --model ... --backend vulkan --device Vulkan0
+Results go to data/bench/<name>.json; scripts/bench_report.py compares them, and
+scripts/bench_placement.py runs the Phase 1 set.
 """
 import argparse
 import ctypes
@@ -30,8 +43,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 import bench_cases as cases  # noqa: E402
+import hwprobe  # noqa: E402
 
 NO_WINDOW = 0x08000000
+SERVERS = {"cuda": ROOT / "models" / "llama.cpp" / "llama-server.exe",
+           "vulkan": ROOT / "models" / "llama.cpp-vulkan" / "llama-server.exe",
+           "cpu": ROOT / "models" / "llama.cpp" / "llama-server.exe"}
 SENTENCE_END = re.compile(r"[.!?…][\"')\]]*(\s|$)")
 BREAKOUT = re.compile("|".join(cases.BREAKOUT_PATTERNS), re.I)
 EXTRA_BODY = {"chat_template_kwargs": {"enable_thinking": False}}
@@ -62,6 +79,43 @@ def gpu_used_mb() -> int:
     return int(out.stdout.strip().splitlines()[0])
 
 
+def uses_rtx4050(backend: str, device: str) -> bool:
+    """Does the run put the model on the RTX 4050? (The Vulkan build calls it Vulkan1.)"""
+    return backend == "cuda" or (backend == "vulkan" and (not device or "Vulkan1" in device))
+
+
+class PowerSampler(threading.Thread):
+    """Every 2 s: the battery's draw (watts, unplugged only) and free system RAM, each sample tagged
+    with the section running then, so each section gets its own average."""
+
+    def __init__(self, every: float = 2.0):
+        super().__init__(daemon=True)
+        self.every, self.section, self.samples = every, "load", []
+        self._stop = threading.Event()
+
+    def run(self):
+        while not self._stop.is_set():
+            battery = hwprobe.battery()
+            self.samples.append({"section": self.section, "on_ac": None if battery is None else battery.on_ac,
+                                 "watts": None if battery is None else battery.watts, "free_mb": hwprobe.ram_mb()[1]})
+            self._stop.wait(self.every)
+
+    def stop(self) -> list[dict]:
+        self._stop.set()
+        self.join()
+        return self.samples
+
+
+def watts_by_section(samples: list[dict]) -> dict | None:
+    """Mean watts per section, or None when any sample was taken plugged in."""
+    if not samples or any(s["on_ac"] is not False for s in samples):
+        return None
+    out: dict[str, list[float]] = {}
+    for s in samples:
+        out.setdefault(s["section"], []).append(s["watts"])
+    return {name: round(sum(v) / len(v), 2) for name, v in out.items()}
+
+
 class VramSampler(threading.Thread):
     def __init__(self):
         super().__init__(daemon=True)
@@ -87,7 +141,7 @@ def start_server(args) -> tuple[subprocess.Popen, float]:
     # and Gemma to 3.5 GB in the first run.
     cmd = [str(args.server), "-m", str(args.model), "--host", "127.0.0.1", "--port", str(args.port),
            "-ngl", str(args.ngl), "-c", str(args.ctx), "-np", "1", "--jinja", "--load-mode", "none",
-           "--cache-ram", "0", *args.extra]
+           "--cache-ram", "0", *(["--device", args.device] if args.device else []), *args.extra]
     log = open(args.out_dir / f"{args.name}.server.log", "w", encoding="utf-8")
     t0 = time.perf_counter()
     proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, creationflags=NO_WINDOW)
@@ -105,10 +159,10 @@ def start_server(args) -> tuple[subprocess.Popen, float]:
     raise RuntimeError("llama-server did not become healthy within 300 s")
 
 
-def chat(base: str, body: dict) -> dict:
+def chat(base: str, body: dict, timeout: float = 180) -> dict:
     req = urllib.request.Request(f"{base}/v1/chat/completions", data=json.dumps({**EXTRA_BODY, **body}).encode(),
                                  headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=180) as r:
+    with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.load(r)
 
 
@@ -164,6 +218,8 @@ def summarize(values: list[float]) -> dict:
 
 def bench_latency(base: str, runs: int) -> dict:
     out = {}
+    for prompt in cases.LATENCY_PROMPTS[:3]:  # warm-ups, not counted (docs/HARDWARE_AWARE_INFERENCE_PLAN.md)
+        stream_chat(base, {"messages": system_msgs(prompt), "temperature": 0.7, "max_tokens": 120, "cache_prompt": True})
     for mode, cache in (("cold", False), ("cached", True)):
         ttft, sent, tps = [], [], []
         for _ in range(runs):
@@ -178,6 +234,40 @@ def bench_latency(base: str, runs: int) -> dict:
                      "decode_tps": round(statistics.median(tps), 1) if tps else None}
         print(f"  latency {mode}: ttft {out[mode]['ttft']}  first sentence {out[mode]['first_sentence']}"
               f"  decode {out[mode]['decode_tps']} tok/s")
+    return out
+
+
+def aj_first_prompt() -> tuple[str, list]:
+    """AJ's system prompt and tool list exactly as the brain sends them (aj/core/brain.py)."""
+    sys.path.insert(0, str(ROOT))
+    from aj import persona, tools
+    from aj.core.brain import LLM_TOOLS
+    from aj.tools import registry
+    tools.load_all()
+    known = {spec.name for spec in registry.specs()}
+    tool_list = registry.openai_tools([n for n in LLM_TOOLS if n in known])
+    return persona.system_prompt({t["function"]["name"] for t in tool_list}, humor=60), tool_list
+
+
+def prefill_timing(resp: dict) -> dict:
+    """llama-server's own count of the prompt it read and how long that took."""
+    t = resp.get("timings") or {}
+    return {"tokens": t.get("prompt_n"), "seconds": round(t["prompt_ms"] / 1000, 2) if t.get("prompt_ms") else None,
+            "tokens_per_s": round(t["prompt_per_second"], 1) if t.get("prompt_per_second") else None}
+
+
+def bench_prefill(base: str, runs: int = 2) -> dict:
+    """AJ's first prompt read from scratch, as at start-up: until it's read he can answer nothing."""
+    system, tool_list = aj_first_prompt()
+    rows = []
+    for _ in range(runs):
+        resp = chat(base, {"messages": [{"role": "system", "content": system}, {"role": "user", "content": "hi"}],
+                           "tools": tool_list, "max_tokens": 1, "cache_prompt": False}, timeout=1200)
+        rows.append(prefill_timing(resp))
+    secs = [r["seconds"] for r in rows if r["seconds"] is not None]
+    out = {"tokens": rows[0]["tokens"], "seconds": round(statistics.median(secs), 2) if secs else None,
+           "tokens_per_s": rows[-1]["tokens_per_s"], "runs": rows}
+    print(f"  prefill: {out['tokens']} tokens in {out['seconds']} s ({out['tokens_per_s']} tokens/s)")
     return out
 
 
@@ -357,8 +447,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--name", required=True)
     ap.add_argument("--model", required=True, type=Path)
-    ap.add_argument("--server", type=Path, default=ROOT / "models" / "llama.cpp" / "llama-server.exe")
+    ap.add_argument("--backend", choices=list(SERVERS), default="cuda")
+    ap.add_argument("--device", default="", help="passed to llama-server --device, e.g. Vulkan0 (the 780M)")
+    ap.add_argument("--server", type=Path, default=None, help="default: the --backend's build")
     ap.add_argument("--ngl", type=int, default=99)
+    ap.add_argument("--idle-secs", type=float, default=30, help="loaded and idle this long first (its watts)")
     ap.add_argument("--ctx", type=int, default=4096)
     ap.add_argument("--port", type=int, default=8089)
     ap.add_argument("--runs", type=int, default=5)
@@ -369,6 +462,9 @@ def main():
                     help="v0 = the fixed benchmark draft; app = aj/persona.py as it is now")
     ap.add_argument("--extra", nargs=argparse.REMAINDER, default=[], help="extra llama-server args (last)")
     args = ap.parse_args()
+    args.server = args.server or SERVERS[args.backend]
+    if args.backend == "cpu":
+        args.ngl = 0
     if args.persona == "app":
         sys.path.insert(0, str(ROOT))
         from aj import persona
@@ -376,35 +472,58 @@ def main():
 
     out_dir = args.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
-    baseline_vram = gpu_used_mb()
+    battery = hwprobe.battery()
+    on_ac = battery is None or battery.on_ac
+    vram = uses_rtx4050(args.backend, args.device) and on_ac  # nvidia-smi wakes the card: only then
+    baseline_vram = gpu_used_mb() if vram else 0
     sampler = VramSampler()
-    sampler.start()
+    if vram:
+        sampler.start()
+    power = PowerSampler()
+    free_before = hwprobe.ram_mb()[1]
+    power.start()
     proc, load_s = start_server(args)
     base = f"http://127.0.0.1:{args.port}"
-    result = {"name": args.name, "model": args.model.name, "ngl": args.ngl, "ctx": args.ctx,
-              "load_seconds": round(load_s, 1), "memory_after_load": process_memory_mb(proc)}
-    print(f"{args.name}: loaded in {load_s:.1f} s, {result['memory_after_load']}")
+    result = {"name": args.name, "model": args.model.name, "backend": args.backend, "device": args.device or None,
+              "on_ac": on_ac, "ngl": args.ngl, "ctx": args.ctx, "load_seconds": round(load_s, 1),
+              "memory_after_load": process_memory_mb(proc)}
+    print(f"{args.name}: loaded in {load_s:.1f} s on {args.backend} {args.device}, {result['memory_after_load']}")
+    free_loaded = free_before
     try:
+        power.section = "idle"
+        time.sleep(args.idle_secs)
+        free_loaded = hwprobe.ram_mb()[1]
         sections = args.sections.split(",")
-        if "latency" in sections:
-            result["latency"] = bench_latency(base, args.runs)
-        if "tools" in sections:
-            result["tools"] = bench_tools(base)
-        if "persona" in sections:
-            result["persona"] = bench_persona(base)
-        if "json" in sections:
-            result["json"] = bench_json(base)
-        if "hard" in sections:
-            result["hard"] = bench_hard(base, think=args.think)
+        for name in sections:
+            power.section = name
+            if name == "latency":
+                result["latency"] = bench_latency(base, args.runs)
+            elif name == "prefill":
+                result["prefill"] = bench_prefill(base)
+            elif name == "tools":
+                result["tools"] = bench_tools(base)
+            elif name == "persona":
+                result["persona"] = bench_persona(base)
+            elif name == "json":
+                result["json"] = bench_json(base)
+            elif name == "hard":
+                result["hard"] = bench_hard(base, think=args.think)
         result["memory_end"] = process_memory_mb(proc)
     finally:
-        sampler.stop()
+        if vram:
+            sampler.stop()
+        samples = power.stop()
         proc.terminate()
         proc.wait(timeout=15)
-    result["vram_peak_mb"] = sampler.peak
-    result["vram_model_mb"] = sampler.peak - baseline_vram
-    print(f"  VRAM: peak {sampler.peak} MB ({result['vram_model_mb']} MB for this model), "
-          f"RAM end {result['memory_end']}")
+    result["vram_peak_mb"] = sampler.peak if vram else None
+    result["vram_model_mb"] = sampler.peak - baseline_vram if vram else None
+    # The 780M's memory is system RAM, and not all of it shows in llama-server's working set.
+    result["system_ram_mb"] = {"free_before": free_before, "free_loaded": free_loaded,
+                               "model": free_before - free_loaded, "min_free": min(s["free_mb"] for s in samples)}
+    result["power_w"] = watts_by_section(samples)
+    vram_said = f"peak {result['vram_peak_mb']} MB ({result['vram_model_mb']} MB for this model)" if vram else "not read"
+    print(f"  VRAM: {vram_said}, RAM end {result['memory_end']}, system RAM taken {result['system_ram_mb']['model']} MB, "
+          f"watts {result['power_w']}")
     (out_dir / f"{args.name}.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
 
 

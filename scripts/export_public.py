@@ -22,7 +22,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 # FIX_PLAN.md too (2026-10-26, the owner): a working log with contact names and notes about his key.
-PRIVATE = {"docs/PLAN.md", "docs/AJ_RESUME_NOTES.md", "docs/FIX_PLAN.md", "scripts/import_sivasafe_memory.py"}
+# The hardware and UI plans too (2026-11-16): working briefs, not documentation.
+PRIVATE = {"docs/PLAN.md", "docs/AJ_RESUME_NOTES.md", "docs/FIX_PLAN.md", "docs/HARDWARE_AWARE_INFERENCE_PLAN.md",
+           "docs/UI_REDESIGN_PLAN.md", "scripts/import_sivasafe_memory.py"}
 
 
 def tracked() -> list[str]:
@@ -45,6 +47,7 @@ def forbidden() -> list[str]:
 
 
 MARK = Path(".git") / "aj-public-export"  # inside .git, so it's never published
+OLD_MARKS = [Path(".git") / "ultron-public-export"]  # what exports made before the rename to AJ left
 
 
 def prepare(target: Path) -> None:
@@ -55,7 +58,7 @@ def prepare(target: Path) -> None:
         subprocess.run(["git", "init", "-q", "-b", "main"], cwd=target, check=True)
         (target / MARK).write_text("made by scripts/export_public.py\n", encoding="utf-8")
         return
-    if not (target / MARK).exists():
+    if not (target / MARK).exists() and not any((target / m).exists() for m in OLD_MARKS):
         sys.exit(f"{target} isn't empty and isn't a previous export: not touching it.")
     for item in target.iterdir():
         if item.name != ".git":

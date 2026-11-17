@@ -1,12 +1,12 @@
 """Watch WhatsApp Desktop load through UI Automation, to learn what tools/whatsapp.py should wait for.
 
-The boss (2026-10-22): WhatsApp has a "loading chats" period the first time it opens, 0 to 100%,
+The user (2026-10-22): WhatsApp has a "loading chats" period the first time it opens, 0 to 100%,
 that can take a while on his Wi-Fi, and the assistant must act only after it. SivaSafe judged
 "ready" by sending screenshots to Gemini; this reads the window's accessibility tree locally.
 
     .venv\\Scripts\\python.exe scripts\\probe_whatsapp.py [--search Appa] [--no-open] [--keep-open]
 
-1. If WhatsApp is in front, the boss is using it: only its loaded state is read, no keys.
+1. If WhatsApp is in front, the user is using it: only its loaded state is read, no keys.
    If it runs in the background, it is closed first, so the load can be watched from the start.
 2. It is launched, and its web page is sampled every 0.3 s; each change is printed with the time.
 3. Once loaded, through tools/whatsapp.py's own steps: a nonsense search shows what "no results"
@@ -34,7 +34,7 @@ import tempfile
 import time
 from pathlib import Path
 
-# Before aj reads it: the app index it builds goes to a temporary folder, never the boss's
+# Before aj reads it: the app index it builds goes to a temporary folder, never the user's
 # %APPDATA%\AJ (the review of 2026-10-22).
 os.environ["APPDATA"] = tempfile.mkdtemp(prefix="aj-probe-")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -298,7 +298,7 @@ def main() -> None:
     print(f"WhatsApp running: {was_running}; windows: {len(windows)}; "
           f"in front: {bool(windows) and windows[0].hwnd == before_front}")
     if windows and windows[0].hwnd == before_front:
-        print("The boss has WhatsApp in front: reading its loaded state only, no keys.")
+        print("The user has WhatsApp in front: reading its loaded state only, no keys.")
         _loaded_report(windows[0].hwnd, args.search)
         return
     if was_running:

@@ -23,12 +23,13 @@ from datetime import datetime
 
 from aj import memory, persona, tools
 from aj.lines import Lines
-from aj.config import DATA_DIR, Settings
-from aj.core import audio, power_source
+from aj.config import CLAP_PATH, DATA_DIR, Settings
+from aj.core import audio, placement, power_source
 from aj.core.audio import Mic, Player
 from aj.core.brain import Brain
 from aj.core.chatterbox_voice import ChatterboxVoice
 from aj.core.chunker import clean_for_speech
+from aj.core.clap import ClapDetector, load_template
 from aj.core.dictation import Dictation
 from aj.core.escalate import Escalator
 from aj.core.laptop_state import Monitor
@@ -102,7 +103,9 @@ class MemoryHook:
 
 
 class Events(Protocol):
-    """What the engine reports while it runs. Called on engine threads, never the UI thread."""
+    """What the engine reports while it runs. Called on engine threads, never the UI thread.
+    An Events may also have on_working(tool): a tool's name when one starts, "" when it ends
+    (the window's Working look); the engine calls it when it's there."""
 
     def on_status(self, status: Status) -> None: ...
 
@@ -114,7 +117,7 @@ class Events(Protocol):
 def load_voice(settings: Settings, first: list[str] = ()) -> Voice | None:
     """Load the voice and render what he says first (the greeting). None if it won't start:
     he then answers in writing only, rather than not starting at all. (Kokoro used to be the
-    fallback; the boss had it removed on 2026-10-21, keeping only the Piper voice.)"""
+    fallback; the user had it removed on 2026-10-21, keeping only the Piper voice.)"""
     engine = settings.voice.engine
     kinds = {"piper": PiperVoice, "chatterbox": ChatterboxVoice, "kokoro": Voice}
     try:
@@ -141,11 +144,14 @@ class Engine:
     def __init__(self, settings: Settings, *, hear: bool = True, speak: bool = True, barge_in: bool = False,
                  server: LlamaServer | None = None, wake_command: Path | None = None):
         """`server`: one already launched (aj/__main__.py starts it before importing this).
-        `wake_command`: the listener started it with what the boss said after its name ("Hey AJ,
+        `wake_command`: the listener started it with what the user said after its name ("Hey AJ,
         open WhatsApp"), a 16 kHz mono WAV: answered first, instead of the greeting."""
         self.settings, self.barge_in = settings, barge_in
         self.stop = threading.Event()
-        self.server = server or LlamaServer(settings.llm)
+        self.server = server or LlamaServer(placement.start_settings(settings))
+        # [placement] mode = "auto": moves the model between the RTX 4050, the 780M and the CPU
+        # while he runs (core/placement.py). Started at the end of load().
+        self.placer: placement.Placer | None = None
         self.ears: Ears | None = None
         self.brain: Brain | None = None
         self.player: Player | None = None
@@ -202,7 +208,38 @@ class Engine:
             voice.prerender_when_idle([*persona.COMMON_PHRASES, *getattr(apps, "PRERENDER", []),
                                        *self.lines.prerender_list()], busy=self._answering)
             self.mouth = Mouth(voice, self.player)
+        self._start_placement()
         return time.perf_counter() - t0
+
+    def _start_placement(self) -> None:
+        """[placement] mode = "auto": the watcher that moves the model between units (core/placement.py)."""
+        if self.settings.placement.mode != "auto":
+            return
+        self.placer = placement.Placer(
+            self.settings, self.server, open_apps=lambda: [a.name for a in self.state.snapshot().apps],
+            idle=lambda: not self._answering(), warm_up=self.brain.warm_up, adopt=self._adopt, stop=self.stop)
+        self.state.changed(ai_unit=self.placer.unit.label)
+        print(f"(AJ's model is on {self.placer.unit.label}.)", flush=True)
+        self.placer.start()
+
+    def _adopt(self, server: LlamaServer, unit: "placement.Unit", why: str) -> None:
+        """The model moved (on the placement thread, between turns): everything that talks to it
+        talks to the new server from now on; the Placer stops the old one after this."""
+        self.server = server
+        if self.brain is not None:
+            self.brain.base = server.base
+            if isinstance(self.brain.memory, MemoryHook):
+                self.brain.memory.base = server.base
+        self.dictation.llm = (server.base, server.settings)
+        if self.thinker is not None:
+            self.thinker.place(server.settings.backend, server.settings.device)
+        self.state.changed(ai_unit=f"{unit.label} ({why})")
+        if self.settings.placement.announce and self.mouth is not None and not self.stop.is_set():
+            self.mouth.say(f"Moving to {unit.label.removeprefix('the ')}: {why}.")
+
+    def _wakes_gpu(self) -> bool:
+        """Only the RTX 4050's clocks need waking while you talk (core/pipeline.py)."""
+        return placement.unit_of(self.server.settings) == placement.RTX
 
     def _brain_and_warm_up(self, tools_job) -> None:
         """The brain, built as soon as the model server answers; its warm-up goes on in the
@@ -213,14 +250,15 @@ class Engine:
         # there's no thinker: hard questions go to Gemini if there's a key, else Qwen answers.
         v = self.settings.voice
         gpu_full = self._speak and v.engine == "chatterbox" and v.chatterbox_device != "cpu"
-        self.thinker = None if gpu_full else Thinker(self.settings.llm)
+        self.thinker = None if gpu_full else Thinker(self.server.settings)  # where the main model is
         self.brain = Brain(self.server.base, self.settings, dispatcher=Dispatcher(confirm=self.confirm),
                            escalator=Escalator(self.thinker), memory=MemoryHook(self.server.base), lines=self.lines,
                            state=self.state, dictation=self.dictation)
+        self.brain.on_tool = self._tool_running
         status = sys.modules.get("aj.tools.status")
         if status is not None:
             status.monitor = self.state
-        self.dictation.llm = (self.server.base, self.settings.llm)
+        self.dictation.llm = (self.server.base, self.server.settings)
         dictation_tools = sys.modules.get("aj.tools.dictation")
         if dictation_tools is not None:
             dictation_tools.desk = self.dictation
@@ -233,8 +271,11 @@ class Engine:
     def _launch_checked(self, name: str, ok: bool) -> None:
         """An app launch was checked (tools/apps.py, a few seconds after "Opening WhatsApp.").
         Live (2026-10-18) WhatsApp never appeared and he never said so; now he does, and he
-        knows it next turn."""
+        knows it next turn. A launch that worked is kept too: asked "did it open?" (live,
+        2026-10-23, after Quick Share) he had only "Opening Quick Share." to go on."""
         if ok:
+            if self.brain is not None:
+                self.brain.record(f"{name} is open: checked a few seconds after launching it.")
             return
         if self.brain is not None:
             self.brain.note(f"{name} didn't open: its window never appeared.")
@@ -250,6 +291,25 @@ class Engine:
             self.player.open()
         return voice
 
+    def _tool_running(self, tool: str) -> None:
+        """The brain started (a name) or finished ("") a tool: told to the window, if it listens."""
+        on_working = getattr(self.events, "on_working", None)
+        if on_working is not None:
+            on_working(tool)
+
+    def voice_level(self) -> float:
+        """How loud AJ's voice is as it's heard right now, 0..1: the speakers play each block
+        output_latency after it's sent, so the orb moves with what you hear, not ahead of it."""
+        player = self.player
+        if player is None:
+            return 0.0
+        return player.level.at(time.perf_counter() - player.output_latency)
+
+    def mic_level(self) -> float:
+        """How loud you are at the mic right now, 0..1 (0 with the mic closed)."""
+        level = getattr(getattr(self.session, "source", None), "level", None)
+        return level.at(time.perf_counter()) if level is not None else 0.0
+
     def _answering(self) -> bool:
         return self.session is not None and not self.session.quiet.is_set()
 
@@ -258,12 +318,22 @@ class Engine:
             self.mouth.say(clean_for_speech(self.greeting))
             self.mouth.wait_done()  # don't listen over his own greeting
 
+    def _clap_detector(self) -> ClapDetector | None:
+        """Two claps wake him from sleep ([sleep] clap), matched to the user's own recorded clap
+        when there is one (scripts/record_clap.py)."""
+        if not self.settings.sleep.clap:
+            return None
+        template = load_template(CLAP_PATH)
+        print(f"(Two claps wake him from sleep: {'your recorded clap' if template else 'any clap'}.)", flush=True)
+        return ClapDetector(template, strictness=self.settings.sleep.clap_strictness)
+
     def new_session(self, source=None, on_turn=None, on_status=None, on_heard=None) -> Session:
         session = Session(self.settings, self.ears, self.brain, self.mouth, source, self.stop,
                           barge_in=self.barge_in, on_turn=on_turn, on_status=on_status,
                           on_heard=on_heard, listening=self._listening,
                           interrupt=self.settings.voice.interrupt, dictation=self.dictation,
-                          gate=self.gate, on_ac=power_source.on_ac_power, ready=self.model_ready)
+                          gate=self.gate, on_ac=power_source.on_ac_power, ready=self.model_ready,
+                          wakes_gpu=self._wakes_gpu, clap=self._clap_detector())
         self.session = session
         session.set_listening(self._listening)  # in case the mic button moved while it was built
         return session
@@ -364,7 +434,10 @@ class Engine:
             print("(Asleep: the model is unloaded; the graphics card is free.)", flush=True)
 
     def model_ready(self) -> None:
-        """The model, loaded again if sleep mode let go of it. Called before any answer."""
+        """The model, loaded again if sleep mode let go of it, or started again on the right unit
+        if its server died (a GPU that went away under it: core/placement.py). Called before any answer."""
+        if self.placer is not None:
+            self.placer.recover()
         with self._model_lock:
             if not self._model_freed or self.stop.is_set():
                 return
@@ -378,7 +451,7 @@ class Engine:
             print(f"(Awake: the model is back, {self.reload_secs:.1f} s.)", flush=True)
 
     def read_wake_command(self) -> tuple[str, list] | None:
-        """What the boss said after its name when the listener started it (aj/listener.py):
+        """What the user said after its name when the listener started it (aj/listener.py):
         (the command, its audio), or None. The recording is deleted once read, whatever happens."""
         path, self.wake_command = self.wake_command, None
         if path is None:

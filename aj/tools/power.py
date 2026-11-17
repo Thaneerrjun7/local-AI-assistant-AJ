@@ -1,10 +1,10 @@
 """The laptop's own power: lock, sleep, restart, shut down, sign out, and calling a shutdown off.
 
-Left out at first (docs/PLAN.md, "Deliberately not included"); the boss asked for them on
+Left out at first (docs/PLAN.md, "Deliberately not included"); the user asked for them on
 2026-10-18, after AJ had claimed "Screen is now locked." and "System is now powered down."
 with no way to do either. Now he can, honestly:
 - Locking is harmless (a sign-in brings everything back), so it runs at once.
-- Everything else can lose unsaved work, so the boss says yes in the window first.
+- Everything else can lose unsaved work, so the user says yes in the window first.
 - Restart and shut down go through Windows' own shutdown.exe with a 30-second countdown,
   which Windows shows on screen; "cancel the shutdown" stops it. Sleep and sign-out wait a
   few seconds first, so he can say so before the laptop goes.
@@ -127,7 +127,7 @@ _DEVICE = r"(?:the |my |this )?(?:laptop|computer|pc|machine|system|device)"
 _SLEEPER = r"(?:(?:the |my |this )?(?:laptop|pc|machine|system|device)|(?:the |my |this )computer)"
 INTENTS: list[tuple[str, str, Callable]] = [
     (r"lock(?: up)?(?: (?:the |my |this )?(?:screen|laptop|computer|pc|machine|it))?", "lock_screen", lambda m: {}),
-    # "Do me a favor and close the screen" (the boss, 2026-10-19) means lock it.
+    # "Do me a favor and close the screen" (the user, 2026-10-19) means lock it.
     (r"(?:close|shut|turn off|switch off|black out) (?:the |my |this )?screen", "lock_screen", lambda m: {}),
     (rf"(?:put|send) {_DEVICE} (?:to sleep|in(?:to)? sleep(?: mode)?)|sleep {_SLEEPER}|{_SLEEPER}(?: go)? to sleep",
      "sleep_laptop", lambda m: {}),

@@ -2,11 +2,11 @@
 
 Two features need to type into another app: WhatsApp chat search (tools/whatsapp.py) and
 dictation. SivaSafe pasted its text through the clipboard (pyperclip, then Ctrl+V), which threw
-away whatever the boss had copied. Here the clipboard is never touched: text is typed as keys.
+away whatever the user had copied. Here the clipboard is never touched: text is typed as keys.
 
 Two kinds of key event, because neither reaches every app:
 - A character the keyboard layout has a key for (with Shift at most) is typed as that key,
-  exactly as the boss would type it. Live (2026-10-22) WhatsApp's search box ignored Unicode key
+  exactly as the user would type it. Live (2026-10-22) WhatsApp's search box ignored Unicode key
   events completely and took these. Caps Lock is allowed for, so "Appa" stays "Appa".
 - Anything else (emoji, characters this layout can't type, AltGr ones, which would mean holding
   Ctrl+Alt) goes as a Unicode key event (KEYEVENTF_UNICODE): a character outside the Basic
@@ -23,13 +23,13 @@ as Enter would (the review of 2026-10-22). Only press("enter") sends Enter, and 
 means it uses it (whatsapp.py opening the top search result).
 
 Long text goes in small batches with a short pause between them, so a busy WebView app
-(WhatsApp, Teams) can keep up. Before anything is sent, a modifier the boss is still holding (the
+(WhatsApp, Teams) can keep up. Before anything is sent, a modifier the user is still holding (the
 Ctrl of a shortcut, say) gets a moment to be let go, so a typed "a" can't turn into Ctrl+A. If one
 is still held after that, nothing is sent at all (ModifiersHeld): until 2026-10-22 it typed anyway,
 and letters typed with Ctrl down are shortcuts, not text (the review of 2026-10-22).
 
 Every event carries _EXTRA_INFO in dwExtraInfo, so a keyboard hook can tell AJ's keys from
-the boss's. The SendInput call goes through the module-level _send_input so tests can replace it
+the user's. The SendInput call goes through the module-level _send_input so tests can replace it
 and never touch the desktop (system.py does the same with _keybd_event).
 """
 import ctypes

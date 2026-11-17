@@ -4,7 +4,7 @@ old character's wording, never calling himself TARS, and jokes that follow the h
 
 Writes data/bench/persona_check.md for the user to read. Uses aj/persona.py exactly as the app
 does (system prompt + history), at the humor settings asked for, with the default settings: APPDATA
-points at a temporary folder before aj is imported, so nothing of the boss's %APPDATA%\\AJ is read
+points at a temporary folder before aj is imported, so nothing of the user's %APPDATA%\\AJ is read
 or written (the review of 2026-10-22). Run:
 .venv\\Scripts\\python.exe scripts\\persona_check.py [humor ...]   (default: 60, then 0 and 100
 for the small talk)

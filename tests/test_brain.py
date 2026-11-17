@@ -107,15 +107,15 @@ class BrainTests(unittest.TestCase):
         self.assertEqual(said, "Twenty-five eighty-four each.")
 
     def test_conversation_with_tool_call_follows_up(self):
-        d = FakeDispatcher(result="Opening Spotify.")
+        d = FakeDispatcher(result="Volume at 20 percent.")
         b, mouth = self.make(dispatcher=d), FakeMouth()
         with mock.patch("aj.tools.intents.match", return_value=None), \
                 mock.patch.object(brain_mod, "stream_events", side_effect=rounds(
-                    [("tools", [{"id": "", "name": "open_app", "arguments": '{"name": "spotify"}'}])],
-                    [("text", "Music. Fine. ")])) as model:
-            said = b.reply("I want some music", mouth, TurnTimes(0.0))
-        self.assertEqual(d.calls, [("open_app", '{"name": "spotify"}')])
-        self.assertEqual(said, "Music. Fine.")
+                    [("tools", [{"id": "", "name": "set_volume", "arguments": '{"level": 20}'}])],
+                    [("text", "Quieter. Fine. ")])) as model:
+            said = b.reply("it's too loud", mouth, TurnTimes(0.0))
+        self.assertEqual(d.calls, [("set_volume", '{"level": 20}')])
+        self.assertEqual(said, "Quieter. Fine.")
         follow_up = model.call_args_list[1]
         self.assertEqual(follow_up.args[1][-1]["role"], "tool")  # the result went back to the model
         self.assertEqual(follow_up.kwargs["tools"], model.call_args_list[0].kwargs["tools"])  # same cached prefix
@@ -272,7 +272,48 @@ class HonestyTests(unittest.TestCase):
             said = b.reply("pull up the settings thing", mouth, TurnTimes(0.0))
         self.assertIn("no tool ran", model.call_args_list[1].args[1][-1]["content"])
         self.assertEqual(d.calls, [("open_app", '{"name": "settings"}')])
-        self.assertEqual(said, "There.")  # the false claim was never said
+        # The false claim was never said, and an app tool's own result is the answer (2026-10-23):
+        # no third request for the model to word it.
+        self.assertEqual(said, "Opening Settings.")
+        self.assertEqual(model.call_count, 2)
+
+    def test_an_app_tools_result_is_said_as_it_is(self):
+        # Live (2026-10-23) switch_to_app worked for "open Chrome" and he said only "What do you need?".
+        for result, expected in [(ToolResult("Switching to Google Chrome.", "ok"), "Switching to Google Chrome."),
+                                 (ToolResult("I can't find an app called Photoshop.", "error"),
+                                  "I can't find an app called Photoshop.")]:
+            d = FakeDispatcher(result=result)
+            b, mouth = self.make(dispatcher=d), FakeMouth()
+            with mock.patch("aj.tools.intents.match", return_value=None), \
+                    mock.patch.object(brain_mod, "stream_events", side_effect=rounds(
+                        [("tools", [{"id": "a", "name": "open_app", "arguments": '{"name": "chrome"}'}])],
+                        [("text", "What do you need?")])) as model:
+                said = b.reply("jarvis bring chrome up for me", mouth, TurnTimes(0.0))
+            self.assertEqual(said, expected)
+            self.assertEqual(model.call_count, 1)
+
+    def test_saying_an_app_cant_be_opened_without_trying_gets_it_tried(self):
+        # Live (2026-10-23): "I can't open Claude." with Claude installed, and no tool called.
+        d = FakeDispatcher(result=ToolResult("Opening Claude.", "ok"))
+        b, mouth = self.make(dispatcher=d), FakeMouth()
+        with mock.patch("aj.tools.intents.match", return_value=None), \
+                mock.patch.object(brain_mod, "stream_events", side_effect=rounds(
+                    [("text", "I can't open Claude. Only Chrome is available.")],
+                    [("tools", [{"id": "a", "name": "open_app", "arguments": '{"name": "Claude"}'}])])) as model:
+            said = b.reply("open the claude thing", mouth, TurnTimes(0.0))
+        self.assertIn("never called open_app", model.call_args_list[1].args[1][-1]["content"])
+        self.assertEqual(d.calls, [("open_app", '{"name": "Claude"}')])
+        self.assertEqual(said, "Opening Claude.")  # the refusal was never said
+        self.assertEqual(mouth.said, ["Opening Claude."])
+
+    def test_a_checked_launch_is_in_what_he_did_lately(self):
+        b = self.make()
+        b.record("Quick Share is open: checked a few seconds after launching it.")
+        with mock.patch.object(brain_mod, "stream_events", side_effect=pieces("Yes.")) as model:
+            b.reply("did the app open?", None, TurnTimes(0.0))
+        sent = model.call_args.args[1][-1]["content"]
+        self.assertIn("Quick Share is open: checked", sent)
+        self.assertNotIn("Since your last reply", sent)  # nothing to announce
 
     def test_if_he_still_cant_he_says_it_isnt_done(self):
         b, mouth = self.make(dispatcher=FakeDispatcher()), FakeMouth()

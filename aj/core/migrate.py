@@ -1,6 +1,6 @@
 """One-time moves from the project's old name to AJ, so an old install keeps working.
 
-The boss, 2026-10-22: "Change everything to AJ. You can name it as AJ Local Assistant." What an
+The user, 2026-10-22: "Change everything to AJ. You can name it as AJ Local Assistant." What an
 install made under the old name is renamed in place, never copied, merged or deleted, and only
 while nothing of the old install is running (its named mutexes say so):
 - %APPDATA%\\<old> becomes %APPDATA%\\AJ: settings, memory, app index, voice cache and logs;
@@ -33,7 +33,7 @@ from pathlib import Path
 
 from aj import config
 
-# The project's name until 2026-10-22. The boss asked for every trace of it to go, so it is
+# The project's name until 2026-10-22. The user asked for every trace of it to go, so it is
 # spelled in two pieces, here only: a search of the code for the old name finds nothing, and this
 # is the one place that still knows it, to find what an old install left behind.
 OLD = "Ult" + "ron"
@@ -132,6 +132,10 @@ def _merge_logs(new: Path, old: Path) -> list[str]:
 def run(data_dir: Path | None = None, running: Callable[[], bool] = old_install_running) -> list[str]:
     """Make whatever moves are still due. Returns one note per move made or skipped, for the
     caller's log (which can't be open yet: it lives in the folder being moved)."""
+    if data_dir is None and config.REDIRECTED_TO is not None:
+        # A move made here would happen only in another app's private copy of %APPDATA%: the
+        # 2026-10-22 rename did, and the user's memory went with it (config.py).
+        return [f"%APPDATA% is redirected to {config.REDIRECTED_TO} for this process, so nothing is moved"]
     new = config.DATA_DIR if data_dir is None else data_dir
     old = new.with_name(OLD)
     notes: list[str] = []

@@ -1,6 +1,6 @@
 """First in discovery's order (the double underscore sorts before every other test file), so the
 temporary APPDATA of tests/__init__.py is in place before any test file imports aj. Then it checks
-that every path AJ writes to is inside that folder, never the boss's real %APPDATA%\\AJ (the review
+that every path AJ writes to is inside that folder, never the user's real %APPDATA%\\AJ (the review
 of 2026-10-22: the suite used to rewrite his apps_index.json)."""
 import tests  # noqa: F401  (must stay the first import: it points APPDATA at a temporary folder)
 

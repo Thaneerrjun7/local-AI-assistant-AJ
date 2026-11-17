@@ -58,7 +58,7 @@ def clean_for_speech(text: str) -> str:
 # say them and speech-to-text write them down (scripts/check_pronunciation.py, 2026-10-21): the
 # Piper voice turned "USB" into "UMISB", "RAM" into "our AN", "C: 120 GB" into "See 120, GB3"
 # and "$799" into "7.99".
-# Two vowels and a "d" in the northern voice (the boss, 2026-10-22: "good" sounds like "guv",
+# Two vowels and a "d" in the northern voice (the user, 2026-10-22: "good" sounds like "guv",
 # "RAM" like "rum"). Its espeak spelling is right (gˈʊd, ɹˈæm); the voice's own sounds aren't:
 # - a "good" that ends a phrase loses its "d" (no release), so it trails into a "v": speech-to-
 #   text wrote "Good. Opening it now." as "Gov opening it now"/"Go of opening it now" 11 times in
@@ -70,7 +70,7 @@ def clean_for_speech(text: str) -> str:
 #   times in 160. "rairm" (ɹˈeəm, the American "ram" before an m) moves it forward (F2 1560) and
 #   cut those to 11, but speech-to-text, which knows northern voices, then writes "RAM" less
 #   often (95 in 160, against 118; the rest "REM", "rare"); "rem" was heard as "REM" nearly
-#   always. The boss's ear decides: samples of each are in data/pronunciation_samples.
+#   always. The user's ear decides: samples of each are in data/pronunciation_samples.
 _SAY_AS = [(re.compile(p, flags), r) for p, r, flags in [
     (r"\b(g)ood(?=[\"')\]]*(?:[.,!?;:…]|$))", r"\1oodd", re.IGNORECASE),
     (r"\be\.g\.,?", "for example", re.IGNORECASE), (r"\bi\.e\.,?", "that is", re.IGNORECASE),

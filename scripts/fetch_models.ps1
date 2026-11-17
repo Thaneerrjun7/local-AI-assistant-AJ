@@ -1,6 +1,11 @@
 # Downloads the Phase 1 runtime and models into models\ (git-ignored).
 # Re-running resumes partial files and skips finished ones.
 # To free the space later, delete the whole models\ folder.
+#
+# -Vulkan: only the Vulkan build of the same llama.cpp release, into models\llama.cpp-vulkan\,
+# so a model can run on the Radeon 780M (docs/HARDWARE_AWARE_INFERENCE_PLAN.md, Phase 0). The
+# CUDA build in models\llama.cpp\ is left as it is.
+param([switch]$Vulkan)
 $ErrorActionPreference = "Stop"
 $models = Join-Path $PSScriptRoot "..\models" | Resolve-Path -ErrorAction SilentlyContinue
 if (-not $models) { $models = New-Item -ItemType Directory -Force (Join-Path $PSScriptRoot "..\models") }
@@ -8,6 +13,20 @@ $llm = New-Item -ItemType Directory -Force (Join-Path $models "llm")
 $cpp = New-Item -ItemType Directory -Force (Join-Path $models "llama.cpp")
 
 $build = "b11379"
+if ($Vulkan) {
+  $vk = New-Item -ItemType Directory -Force (Join-Path $models "llama.cpp-vulkan")
+  $name = "llama-$build-bin-win-vulkan-x64.zip"
+  $zip = Join-Path $vk $name
+  Write-Host "==> $name"
+  & curl.exe -L --fail --retry 3 -C - -o $zip "https://github.com/ggml-org/llama.cpp/releases/download/$build/$name"
+  if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 33) { throw "download failed: $name (curl $LASTEXITCODE)" }
+  Expand-Archive -Force $zip -DestinationPath $vk
+  Remove-Item $zip
+  & (Join-Path $vk "llama-server.exe") --version
+  & (Join-Path $vk "llama-server.exe") --list-devices
+  Write-Host "DONE"
+  return
+}
 $files = @(
   @{ url = "https://github.com/ggml-org/llama.cpp/releases/download/$build/llama-$build-bin-win-cuda-13.4-x64.zip"; dir = $cpp },
   @{ url = "https://github.com/ggml-org/llama.cpp/releases/download/$build/cudart-llama-bin-win-cuda-13.4-x64.zip"; dir = $cpp },

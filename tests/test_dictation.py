@@ -438,7 +438,7 @@ class TypingTests(unittest.TestCase):
         self.assertFalse(desk.has_ready())
 
     def test_abort_stops_typing_in_flight(self):
-        """"Stop" from the boss, or talking over the assistant: Dictation.abort()."""
+        """"Stop" from the user, or talking over the assistant: Dictation.abort()."""
         desk = self.make()
         self.desktop.on_type = desk.abort
         with self.assertRaises(core.NotDone) as said:
@@ -643,7 +643,7 @@ class ReplaceTests(unittest.TestCase):
         return desk
 
     def test_the_caret_not_at_the_end_deletes_nothing(self):
-        """Backspace deletes before the caret: with the caret moved back, the boss's own words would
+        """Backspace deletes before the caret: with the caret moved back, the user's own words would
         go (the review of 2026-10-22). It says so and offers "type that"."""
         desk = self.typed()
         self.desktop.caret = 3  # he clicked back into "Hello."
@@ -954,7 +954,7 @@ class PrivacyTests(unittest.TestCase):
         self.assertIsNone(brain.typed_turn)
         memory.after_turn.assert_called_once()
 
-    def test_stop_from_the_boss_aborts_typing_in_flight(self):
+    def test_stop_from_the_user_aborts_typing_in_flight(self):
         from aj.core.brain import Brain
         desk = mock.Mock(armed=None)
         desk.turn_audio = None

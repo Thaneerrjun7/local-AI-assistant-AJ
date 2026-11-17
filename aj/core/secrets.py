@@ -3,7 +3,7 @@ never in a project file. SivaSafe kept every key in one plaintext JSON; AJ doesn
 
 Since the rename to AJ (2026-10-22) the Gemini key is "AJ/Gemini". A key stored under the
 project's old name is read once, copied to the new entry and used; the old entry is left in
-Credential Manager untouched (deleting a secret is the boss's call, not the code's).
+Credential Manager untouched (deleting a secret is the user's call, not the code's).
 """
 import ctypes
 import logging

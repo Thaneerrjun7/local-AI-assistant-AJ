@@ -22,7 +22,7 @@ foreach ($url in $archives) {
   if ($LASTEXITCODE -ne 0) { throw "extract failed: $name" }
   Remove-Item $archive
 }
-# The Piper voice (engine = "piper", the default), on the CPU: the boss picked this one by ear
+# The Piper voice (engine = "piper", the default), on the CPU: the user picked this one by ear
 # from five on 2026-10-21, and the others were removed.
 $piper = New-Item -ItemType Directory -Force (Join-Path $speech "piper")
 foreach ($voice in @("en_GB-northern_english_male-medium")) {

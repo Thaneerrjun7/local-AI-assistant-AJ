@@ -93,7 +93,7 @@ class ToolSpec:
     params: tuple[Param, ...]
     module: str
     ask: str = ""  # CONFIRM tools: the yes/no question, with {argument} slots ("Shut down the laptop?")
-    # Arguments the audit log must not keep: the words of a dictation are the boss's message to
+    # Arguments the audit log must not keep: the words of a dictation are the user's message to
     # someone else (the review of 2026-10-22). Only their length is written down.
     private: tuple[str, ...] = ()
 
@@ -143,7 +143,7 @@ def tool(level: Level = Level.SAFE, timeout: float = 5.0, cloud: bool = False, a
 # The running call's cancel event (dispatch.execute sets it on the tool's own thread). A tool runs
 # on a thread the dispatcher abandons when it times out, and that thread can't be stopped from
 # outside: live, a type_text past its timeout could still have typed, or a start_dictation armed,
-# after the boss had heard "That took too long" (the review of 2026-10-22). A tool that acts on the
+# after the user had heard "That took too long" (the review of 2026-10-22). A tool that acts on the
 # desktop checks this before each step, and stops once it is set.
 _call = threading.local()
 

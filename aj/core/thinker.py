@@ -5,6 +5,11 @@ MiniCPM5-2B in thinking mode scored 12/12 on the hard-task set against Qwen3-4B'
 tight with Qwen and Kokoro already loaded (~5.9 of 6 GB with all three), so llama-server
 starts with --fit: as many layers on the GPU as fit, the rest on the CPU. It unloads after a
 few idle minutes so it costs nothing between hard questions (the user chose on-demand).
+
+It runs where AJ's main model runs (core/placement.py): place() is told when that changes, and a
+thinker loaded on the old unit stops, to load on the new one with the next hard question. On the
+Radeon 780M it scored 10/12 (median 8.2 s, 2.3 GB of system RAM) against 12/12 on the RTX 4050
+(data/bench/placement, 2026-10-27).
 """
 import json
 import subprocess
@@ -26,7 +31,8 @@ SYSTEM = ("You are a careful problem solver working for a voice assistant. Think
 
 class Thinker:
     def __init__(self, llm: LlmSettings, model=MODEL, port: int = PORT):
-        self.server, self.model, self.port = llm.server, model, port
+        self.llm, self.model, self.port = llm, model, port
+        self.server, self._unit = self._where(llm.backend, llm.device)
         self.base = f"http://127.0.0.1:{port}"
         self._proc: subprocess.Popen | None = None
         self._lock = threading.Lock()
@@ -41,9 +47,8 @@ class Thinker:
     def _start(self, timeout: float = 60) -> None:
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         log = open(LOG_DIR / "thinker-server.log", "w", encoding="utf-8")
-        cmd = [self.server, "-m", str(self.model), "--host", "127.0.0.1", "--port", str(self.port),
-               "--fit", "on", "--fit-target", "400", "-c", "8192", "-np", "1", "--jinja",
-               "--load-mode", "none", "--cache-ram", "0"]
+        cmd = [self.server, "-m", str(self.model), "--host", "127.0.0.1", "--port", str(self.port), *self._unit,
+               "-c", "8192", "-np", "1", "--jinja", "--load-mode", "none", "--cache-ram", "0"]
         self._proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, creationflags=NO_WINDOW)
         bind_to_aj(self._proc)
         t0 = time.perf_counter()
@@ -60,6 +65,23 @@ class Thinker:
             time.sleep(0.1)
         self.stop()
         raise RuntimeError("thinker server did not load in time")
+
+    def _where(self, backend: str, device: str) -> tuple[str, list[str]]:
+        """(the llama-server build, its unit arguments) for a unit. On the RTX 4050, --fit: as
+        many layers as fit next to Qwen; elsewhere all of them, or none on the CPU."""
+        if backend == "vulkan":
+            return self.llm.vulkan_server, ["-ngl", "99", *(["--device", device] if device else [])]
+        if backend == "cpu":
+            return self.llm.server, ["-ngl", "0"]
+        return self.llm.server, ["--fit", "on", "--fit-target", "400"]
+
+    def place(self, backend: str, device: str) -> None:
+        """AJ's main model moved: load there from now on, and let go of a thinker loaded elsewhere."""
+        where = self._where(backend, device)
+        if where != (self.server, self._unit):
+            self.stop()
+            with self._lock:
+                self.server, self._unit = where
 
     def stop(self) -> None:
         with self._lock:

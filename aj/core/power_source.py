@@ -1,7 +1,7 @@
 """Is the laptop plugged in? One question, asked every few seconds by the wake listener
 (aj/listener.py) and by sleep mode.
 
-The boss, 2026-10-22: the wake words and sleep mode "should only be available when my laptop is
+The user, 2026-10-22: the wake words and sleep mode "should only be available when my laptop is
 plugged in. If it's not plugged in, this feature should not be available at all." So the
 answer has to be cheap (GetSystemPowerStatus is a plain kernel call, microseconds) and it must
 never raise: a listener that crashed on a failed reading would be off for good.
@@ -16,7 +16,7 @@ How the answers come out:
 
 This is separate from core/power.py's read_power on purpose: that one drops BatteryFlag (needed
 for the no-battery case above) and raises when the call fails, which is right for the battery
-tool that tells the boss what went wrong, and wrong for a background check.
+tool that tells the user what went wrong, and wrong for a background check.
 """
 import ctypes
 from ctypes import wintypes

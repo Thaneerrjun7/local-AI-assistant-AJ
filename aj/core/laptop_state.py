@@ -1,8 +1,8 @@
 """What the laptop is doing right now, kept up to date while AJ is on, so he knows instead of
 guessing.
 
-Live (2026-10-18) he told the boss the battery was at 17% and unplugged when it was at 80% and
-plugged in, and said he couldn't know which apps were open. The boss asked for something that
+Live (2026-10-18) he told the user the battery was at 17% and unplugged when it was at 80% and
+plugged in, and said he couldn't know which apps were open. The user asked for something that
 updates itself and that he reads from. So a Monitor thread refreshes a Snapshot every few
 seconds: the battery and charger, the open apps (which one is in front, which are minimised,
 and what a browser is showing), volume, mute, brightness, the internet connection, CPU and RAM
@@ -10,7 +10,7 @@ load and free disk space. Every turn starts with a fresh look at the quick parts
 summary goes into the message as "[Laptop now: ...]", where the delivery filter treats it as a
 reading (core/delivery.py), so a number he makes up gets caught.
 
-Kept in memory, not in a file: always current, no disk writes every few seconds (the boss asked
+Kept in memory, not in a file: always current, no disk writes every few seconds (the user asked
 for his SSD to be looked after), and gone the moment AJ is off. The cost was measured at
 startup: the quick refresh takes a few milliseconds, the window list about 2 ms. Brightness
 needs WMI through PowerShell (about 1.5 s of a process starting), so it's read rarely.
@@ -57,6 +57,9 @@ class Snapshot:
     cpu: int | None = None
     ram: int | None = None
     disks: tuple[tuple[str, float, float], ...] = ()  # (drive, free GB, total GB)
+    # Where AJ's own model runs ("the Radeon 780M (on battery)"), set by the engine when it moves
+    # (core/placement.py): "where are you running?" gets a reading, not a guess.
+    ai_unit: str = ""
 
     def summary(self) -> str:
         """One line for the model, short enough to send every turn."""
@@ -68,12 +71,14 @@ class Snapshot:
             parts.append("plugged in" if self.plugged else "on battery power")
         front = [a for a in self.apps if a.front]
         others = [a for a in self.apps if not a.front]
+        # "Running", not "open": asked which apps he could open, he read out the open ones
+        # (live, 2026-10-23: "Google Chrome, Claude").
         if front:
             parts.append(f"in front: {_describe(front[0])}")
         if others:
-            parts.append(("also open: " if front else "open: ") + ", ".join(_describe(a) for a in others))
+            parts.append(("also running: " if front else "running: ") + ", ".join(_describe(a) for a in others))
         elif not front:
-            parts.append("no apps open")
+            parts.append("no apps running")
         if self.volume is not None:
             parts.append("sound muted" if self.muted else f"volume {self.volume}%")
         if self.brightness is not None:
@@ -85,6 +90,8 @@ class Snapshot:
             parts.append(", ".join(x for x in load if x))
         if self.disks:
             parts.append("free space " + ", ".join(f"{d} {free:.0f} GB of {total:.0f} GB" for d, free, total in self.disks))
+        if self.ai_unit:
+            parts.append(f"your own model running on {self.ai_unit}")
         return "; ".join(parts)
 
 
@@ -270,7 +277,7 @@ class Monitor:
         now = time.monotonic()
         cpu_now = cpu_times()
         new = read(old, cpu_before=None, slow=False)
-        new = replace(new, cpu=cpu_percent(self._cpu, cpu_now) if self._cpu else old.cpu)
+        new = replace(new, cpu=cpu_percent(self._cpu, cpu_now) if self._cpu else old.cpu, ai_unit=old.ai_unit)
         self._cpu = cpu_now
         if slow or now - self._last_disks >= DISKS_EVERY:
             new = replace(new, **_safely(lambda: {"disks": disks()}, "disks"))

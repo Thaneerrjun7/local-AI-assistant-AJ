@@ -13,6 +13,9 @@ How the rules work:
 - Patterns see normalized text: lowercase, single spaces, no punctuation ("what's" -> "whats",
   "35%" -> "35", but "5:30" and "2.5" keep their digits together), with leading "hey", "computer", "aj",
   "please", "can you" and trailing "please", "now", "aj", "for me" removed.
+- The whole transcript is tried first, then its last sentence on its own: "Actually, you know
+  what? I changed my mind. Open settings." ends in a command (live, 2026-10-23). Only the last:
+  in "Open Chrome. No, don't." the command was taken back.
 - The builder turns the match into the tool's arguments. It may return None to decline, and the
   next rule is tried. None values are dropped. The dispatcher still validates and coerces
   everything, so {"level": "35"} is fine for an int.
@@ -37,10 +40,18 @@ _SPACES = re.compile(r"\s+")
 # the model then said "Switching to Settings." without opening anything.
 # Fillers too: "Uh lock the screen" and "You open YouTube" (speech-to-text dropped the "can")
 # missed the fast path live (2026-10-19), and the model then claimed it was done.
-_LEADING = re.compile(r"^(?:(?:hey|hi|ok|okay|computer|aj|a j|please|(?:can|could|would|will) you|do me a favou?r(?: and)?|"
-                      r"go ahead and|i (?:want|need) you to|just|quickly|uh+|um+|erm?|hmm+|so|and|well|alright|"
-                      r"right|you)\s+)+")
+# Live (2026-10-23) "No no open word, word", "Jarvis open chrome for me" and "All right, turn off"
+# went to the model, which refused or did something else: a name he isn't called or an "actually"
+# before a command is a lead-in too, and so is a correction ("no") or a "yeah", but only right
+# before a command's verb: "No jokes." is a command of its own.
+_VERBS = (r"open|launch|start|close|quit|switch|go|bring|pull|lock|turn|set|put|play|pause|mute|unmute|show|take|"
+          r"find|search|remind|check|tell|what|whats")
+_LEADING = re.compile(r"^(?:(?:hey|hi|ok|okay|computer|aj|a j|jarvis|please|(?:can|could|would|will) you|"
+                      r"do me a favou?r(?: and)?|go ahead and|i (?:want|need) you to|i said|just|quickly|uh+|um+|"
+                      r"erm?|hmm+|so|and|well|alright|all right|right|you|actually|"
+                      rf"(?:no|nope|yeah|yes|now|then)(?=(?:\s+(?:no|nope|yeah|yes))*\s+(?:{_VERBS})\b))\s+)+")
 _TRAILING = re.compile(r"(?:\s+(?:please|now|aj|a j|for me))+$")
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
 
 @dataclass(frozen=True)
@@ -63,25 +74,33 @@ def normalize(transcript: str) -> str:
 def match(transcript: str) -> tuple[str, dict] | None:
     """(tool name, arguments) for a command the fast path recognises, otherwise None."""
     rules = _rules if _rules is not None else _collect_now()
-    text = normalize(transcript)
-    if not text:
-        return None
-    for rule in rules:
-        found = rule.pattern.fullmatch(text)
-        if found is None:
-            continue
-        try:
-            args = rule.build(found)
-        except Exception:
-            log.exception("intent for %s from %s failed on %r; skipping it", rule.tool, rule.source, text)
-            continue
-        if args is None:
-            continue
-        if not isinstance(args, dict):
-            log.warning("intent for %s from %s returned %r, not a dict; skipping it", rule.tool, rule.source, args)
-            continue
-        return rule.tool, {k: v for k, v in args.items() if v is not None}
+    for text in _candidates(transcript):
+        for rule in rules:
+            found = rule.pattern.fullmatch(text)
+            if found is None:
+                continue
+            try:
+                args = rule.build(found)
+            except Exception:
+                log.exception("intent for %s from %s failed on %r; skipping it", rule.tool, rule.source, text)
+                continue
+            if args is None:
+                continue
+            if not isinstance(args, dict):
+                log.warning("intent for %s from %s returned %r, not a dict; skipping it", rule.tool, rule.source, args)
+                continue
+            return rule.tool, {k: v for k, v in args.items() if v is not None}
     return None
+
+
+def _candidates(transcript: str) -> list[str]:
+    """The normalized transcript, then its last sentence if it has more than one."""
+    whole = normalize(transcript)
+    out = [whole] if whole else []
+    sentences = [s for s in _SENTENCE_END.split(transcript.strip()) if s.strip()]
+    if len(sentences) > 1 and (last := normalize(sentences[-1])) and last != whole:
+        out.append(last)
+    return out
 
 
 def collect(modules: Iterable[ModuleType] | None = None) -> int:

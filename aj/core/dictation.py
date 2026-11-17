@@ -1,6 +1,6 @@
-"""Dictation: the boss says it, and it's typed exactly where his cursor is, in any app.
+"""Dictation: the user says it, and it's typed exactly where his cursor is, in any app.
 
-The boss, 2026-10-22: "I'll say to the AI and it'll type it on exactly where I want. It could be
+The user, 2026-10-22: "I'll say to the AI and it'll type it on exactly where I want. It could be
 my Google Chrome messages. It could be WhatsApp messages. It could be anywhere... I want it to be
 accurate." And: "I do not want this AI to type the message and send it for me. I'll do that
 myself." So:
@@ -23,7 +23,7 @@ myself." So:
   address bar of the same window used to get the rest of the message (the review of 2026-10-22).
 - It can be stopped: a cancel event is checked before the window is brought forward, before each
   piece, between Gemini's tries and before a dictation is armed. It is set when the dispatcher
-  gives up on the tool (its timeout), and when the boss says stop or cancel, or talks over the
+  gives up on the tool (its timeout), and when the user says stop or cancel, or talks over the
   assistant (Dictation.abort). Until 2026-10-22 an abandoned tool could still type afterwards.
 - "Make it nicer" rewrites the words as refined, polite English (same meaning, nothing added).
   Right after typing, it replaces what was typed only when that is provably safe: same window and
@@ -82,7 +82,7 @@ log = logging.getLogger(__name__)
 # ---- what he hears ----------------------------------------------------------------------------
 # Plain and short: the words are on his screen, so nothing is read back.
 GO_AHEAD = "Go ahead."
-ASK_MESSAGE = "What would you like to say?"  # after a WhatsApp chat opens (the boss, 2026-10-22)
+ASK_MESSAGE = "What would you like to say?"  # after a WhatsApp chat opens (the user, 2026-10-22)
 TYPED = "Typed it."
 TYPED_POLISHED = "Typed the polished version."
 TYPED_UNPOLISHED = "Couldn't polish it, so I typed it as you said it."
@@ -355,7 +355,7 @@ _CANCEL = re.compile(r"^\W*(?:(?:oh|uh+|um+|okay|ok|no|actually|wait|sorry)\W+)*
 
 
 def is_cancel(text: str) -> bool:
-    """Is this whole answer a "never mind"? ("No", "Nothing", "Cancel": the boss, 2026-10-22.)"""
+    """Is this whole answer a "never mind"? ("No", "Nothing", "Cancel": the user, 2026-10-22.)"""
     return bool(_CANCEL.match(text or ""))
 
 
@@ -491,7 +491,7 @@ _kernel32.GetCurrentThreadId.restype = wintypes.DWORD
 
 
 class FrontWatch:
-    """The last window in front that isn't one of ours. When the boss types "type that" into the
+    """The last window in front that isn't one of ours. When the user types "type that" into the
     assistant's own box, its window is in front, and the one he means is the one before it.
 
     Windows tells a hook each time the front window changes (SetWinEventHook), so this costs
@@ -760,7 +760,7 @@ def replace_typed(hwnd: int, old: str, new: str, desktop: Desktop | None = None,
 # ---- the assistant's dictation -----------------------------------------------------------------
 
 class NotDone(Exception):
-    """Nothing (or not all of it) was typed; the message says why, for the boss to hear."""
+    """Nothing (or not all of it) was typed; the message says why, for the user to hear."""
 
 
 @dataclass(frozen=True)
@@ -792,7 +792,7 @@ class Dictation:
         self.desktop = desktop or Desktop()
         self.ears, self.llm = ears, llm
         self.watch = FrontWatch(self.desktop)
-        self.armed: Request | None = None  # start_dictation ran: the boss's next words are the message
+        self.armed: Request | None = None  # start_dictation ran: the user's next words are the message
         self.turn_audio: tuple | None = None  # this turn's speech (the pipeline sets it; None if typed)
         self.last_heard = ""
         self._lent: _Lent | None = None
@@ -815,7 +815,7 @@ class Dictation:
 
     def abort(self) -> bool:
         """Stop every typing, polishing or arming in flight, before its next step. The brain
-        calls it when the boss says stop or cancel, the pipeline when he talks over the assistant,
+        calls it when the user says stop or cancel, the pipeline when he talks over the assistant,
         the engine when it turns off (the review of 2026-10-22). True if anything was in flight."""
         with self._live_lock:
             live = list(self._live)
@@ -852,7 +852,7 @@ class Dictation:
         self._lent = _Lent(tuple(_pieces(pieces)), said or "", command, request)
 
     def arm(self, polish: bool = False, app: str = "", check: bool = True, cancel=None) -> str:
-        """Wait for the boss's next words, to type them into the window in front now (or `app`'s).
+        """Wait for the user's next words, to type them into the window in front now (or `app`'s).
         `check`: first make sure the focus there is in a text box, so a minute of dictation isn't
         wasted on a window that can't take it. `cancel`: set (the tool timed out, or he said stop)
         before it is armed, and it isn't."""
