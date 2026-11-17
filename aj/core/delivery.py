@@ -189,7 +189,11 @@ _ACTIONS: list[tuple[str, set[str] | None]] = [
      {"create_reminder", "start_timer", "cancel_reminder", "set_volume", "set_brightness"}),
     (r"turn(?:ed|ing)? (?:it |the volume |the sound |the brightness )?(?:up|down)|rais(?:e|ed|ing)|"
      r"lower(?:ed|ing)?|dimm(?:ed|ing)|brighten(?:ed|ing)?", {"set_volume", "set_brightness"}),
-    (r"turn(?:ed|ing)? (?:it |them |that )?(?:on|off)", {"mute", "set_volume", "set_brightness", *_POWER}),
+    # "I've turned the heater on" (tests/test_tool_fixes.py, 2026-11-18): a thing between "turned" and
+    # "on" got past this as "turned it on" only.
+    # Past tense only for that: "Turn the lights off when you leave" is advice, not a claim.
+    (r"turn(?:ed|ing)? (?:it |them |that )?(?:on|off)|turned (?:the|your|my) [\w-]+(?: [\w-]+)? (?:on|off)",
+     {"mute", "set_volume", "set_brightness", *_POWER}),
     # Work in general ("Today I processed tasks."): true after any tool.
     (r"processed|handled|monitored|checked|scanned|organi[sz]ed|analy[sz]ed|reviewed|cleaned|optimi[sz]ed|"
      r"updated|backed up|fixed|sorted|taken care of", set()),
@@ -215,6 +219,15 @@ _CLAIMS = [([re.compile(shape.format(v=verbs), re.IGNORECASE) for shape in _SHAP
            for verbs, tools in _ACTIONS]
 # "Wi-Fi is now active", "it's now off": switched by him, so only these tools could have.
 _NOW_SWITCHED = re.compile(r"\b(?:is|are|'s|'re)\s+now\s+(?:active|on|off|enabled|disabled|live)\b", re.IGNORECASE)
+# "Mic is off, sir." (live, 2026-11-18, after "off your mic."): he can't switch his own mic. Since
+# then "turn off the mic" and "mute" are done in code before the model hears them, so the model
+# saying it is always made up. "Say 'turn off the mic'" is telling the user how, not a claim.
+_MIC_CLAIM = re.compile(r"\b(?:mic|microphone|mike)\b[^.?!]{0,20}?\b(?:off|muted|disabled|closed)\b|"
+                        r"\b(?:turned|switched|shut|muted|closed)\s+(?:off\s+)?(?:the\s+|my\s+|your\s+)?"
+                        r"(?:mic|microphone|mike)\b|\b(?:muted|silenced)\s+(?:myself|me|you)\b|\bi'?m\s+(?:now\s+)?muted\b",
+                        re.IGNORECASE)
+_HUMOR_CLAIM = re.compile(r"\bhumou?r(?: setting)?(?: is)?(?: now)? (?:at|set to|down to|up to|to) \d+", re.IGNORECASE)
+_TELLS_HOW = re.compile(r"\b(?:say|click|press|tap|use|button)\b", re.IGNORECASE)
 # "I'll message Appa." (2026-10-21): "message" as a verb, only in a promise ("Message: Hi Mum..."
 # at the start of a draft is not a claim)
 _SEND_PROMISE = re.compile(r"\bi(?:'ll| will|'m going to| am going to|'m about to)\s+(?:now\s+|just\s+)?"
@@ -338,6 +351,10 @@ def action_claims(sentence: str) -> list[set[str] | None]:
                 break
     if _NOW_SWITCHED.search(text):
         found.append(_SWITCHES)
+    if _HUMOR_CLAIM.search(text):
+        found.append({"set_humor", "personality_setting"})  # 2026-11-18: said without either running
+    if _MIC_CLAIM.search(text) and not _TELLS_HOW.search(text):
+        found.append(None)  # his mic: only "turn off the mic" (core/pipeline.py) or the button switch it
     if _SEND_PROMISE.search(text):
         found.append(None)
     if _TYPE_PROMISE.search(text):

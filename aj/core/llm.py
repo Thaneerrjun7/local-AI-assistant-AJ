@@ -19,11 +19,16 @@ def server_command(s: LlmSettings) -> list[str]:
       --load-mode none  ~0.75 GB instead of 2.8 GB (mmap keeps the model file resident)
       --cache-ram 0     no host-RAM prompt cache; its default lets it grow to 8 GB.
                         Each slot's KV cache on the GPU still reuses the persona prefix.
-    -np 2: slot 0 for conversation, slot 1 for background memory extraction."""
+    -np 2: slot 0 for conversation, slot 1 for background memory extraction.
+      -kvu              one KV pool the two slots share (2026-11-18). Split in halves, the
+                        conversation had 8,192 tokens, and a prompt of 8,249 was refused live
+                        (persona, every tool and the history); memory extraction needs ~2,000
+                        and runs only when he's idle. Shared, either may use all 16,384 for
+                        the same graphics memory (n_ctx_slot = 16384, measured)."""
     server = s.vulkan_server if s.backend == "vulkan" else s.server
     layers = 0 if s.backend == "cpu" else s.gpu_layers
     cmd = [server, "-m", s.model, "--host", "127.0.0.1", "--port", str(s.port),
-           "-ngl", str(layers), "-c", str(s.context), "-np", "2", "--jinja",
+           "-ngl", str(layers), "-c", str(s.context), "-np", "2", "-kvu", "--jinja",
            "--load-mode", "none", "--cache-ram", "0"]
     if s.device and s.backend != "cpu":
         cmd += ["--device", s.device]

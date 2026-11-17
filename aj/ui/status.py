@@ -19,6 +19,8 @@ _LOOKS: dict[Status, tuple[str, str]] = {
     Status.ASLEEP_MIC_OFF: ("Asleep · mic off", theme.MUTED),
     # The mic wouldn't open (2026-10-22): the window comes up saying so, and it is tried again.
     Status.MIC_FAILED: ("Microphone not working · check it, then click the mic", theme.RED_BRIGHT),
+    # An answer failed (2026-11-18): shown for a few seconds, then he listens again.
+    Status.ERROR: ("Error · that answer failed, ask again", theme.RED_BRIGHT),
 }
 ERROR = ("Stopped: something went wrong", theme.RED_BRIGHT)
 
@@ -29,7 +31,7 @@ NOT_READY = {Status.LOADING, Status.TURNING_OFF}
 # engine that died. The status words take the alarm's colour too (the user, 2026-10-23).
 ERROR_MODE = "error"
 ERROR_TONE = "#ff5a4e"
-_TONES = {Status.MIC_FAILED: "#ffa25c"}
+_TONES = {Status.MIC_FAILED: "#ffa25c", Status.ERROR: ERROR_TONE}
 
 
 def look(status: Status) -> tuple[str, str]:

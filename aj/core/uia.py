@@ -350,6 +350,28 @@ def set_focus(target: Node | Any) -> bool:
         return False
 
 
+_SELECTION_ITEM_PATTERN, _LEGACY_PATTERN = 10010, 10018
+
+
+def select(target: Node | Any) -> bool:
+    """Select an item, as a click would: a browser tab, a list item (Chrome's tab strip, 2026-11-18).
+    Through its SelectionItem pattern, else its default action. True if either was accepted."""
+    element = target.element if isinstance(target, Node) else target
+    module = _load()
+    if element is None or module is None:
+        return False
+    for pattern_id, interface, call in ((_SELECTION_ITEM_PATTERN, "IUIAutomationSelectionItemPattern", "Select"),
+                                        (_LEGACY_PATTERN, "IUIAutomationLegacyIAccessiblePattern", "DoDefaultAction")):
+        try:
+            pattern = element.GetCurrentPattern(pattern_id)
+            if pattern:
+                getattr(pattern.QueryInterface(getattr(module, interface)), call)()
+                return True
+        except Exception as exc:
+            log.debug("%s failed: %s", call, exc)
+    return False
+
+
 def value(target: Node | Any) -> str | None:
     """An element's current text through its Value pattern (an edit box's contents), or None."""
     element = target.element if isinstance(target, Node) else target

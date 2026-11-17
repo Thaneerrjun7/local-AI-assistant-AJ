@@ -156,6 +156,21 @@ def speech_parts(text: str) -> list[tuple[str, str]]:
     return parts
 
 
+# "Sir" and "boss" stay in the sentence they belong to (the user, 2026-11-18: "his sir looks like
+# it's someone else speaking completely"). Each chunk is voiced on its own, with its own
+# intonation, so "Because I'm a British AI," then "sir, and a bit of a posh machine." sounded like
+# two speakers, and "It got mugged! Sir." made "Sir." a sentence by itself. So no cut just before
+# "sir", and a lone "Sir." joins the sentence before it with a comma: "It got mugged, sir."
+ADDRESSES = ("sir", "boss")
+_LONE_ADDRESS = re.compile(r"[.!?…]+[\"')\]]*\s+(sir|boss)(?=\s*[.!?…])", re.IGNORECASE)
+_NEXT_WORD = re.compile(r"\s*([A-Za-z]*)")
+
+
+def join_address(text: str) -> str:
+    """"Done. Sir." -> "Done, sir."."""
+    return _LONE_ADDRESS.sub(lambda m: ", " + m.group(1).lower(), text)
+
+
 class SentenceChunker:
     def __init__(self, first_min_words: int = 3):
         self.first_min_words = first_min_words
@@ -176,17 +191,39 @@ class SentenceChunker:
                 self._first = False
 
     def flush(self) -> list[str]:
-        chunk, self._buf = clean_for_speech(self._buf), ""
+        chunk, self._buf = clean_for_speech(join_address(self._buf)), ""
         return [chunk] if chunk else []
 
+    def _next_word(self, pos: int) -> tuple[str, bool]:
+        """The word starting after `pos` (spaces skipped), and whether it's complete yet."""
+        m = _NEXT_WORD.match(self._buf, pos)
+        return m.group(1), m.end() < len(self._buf)
+
+    def _address_next(self, pos: int) -> bool:
+        """Could the next word be "sir" or "boss"? Unknown yet counts as yes: wait a token."""
+        word, complete = self._next_word(pos)
+        if not word and not complete:
+            return True  # nothing after it yet
+        lower = word.lower()
+        return lower in ADDRESSES if complete else any(a.startswith(lower) for a in ADDRESSES)
+
     def _find_cut(self) -> int | None:
+        self._buf = join_address(self._buf)
         m = _SENTENCE_END.search(self._buf)
         if self._first:
             end = m.start() if m else len(self._buf)
             cuts = [c.end() for c in _CLAUSE_END.finditer(self._buf, 0, end)
-                    if len(self._buf[:c.start()].split()) >= self.first_min_words]
+                    if len(self._buf[:c.start()].split()) >= self.first_min_words and not self._address_next(c.end())]
             cuts += [j.start() + 1 for j in _JOINT.finditer(self._buf, 0, end)
                      if len(self._buf[:j.start()].split()) >= JOINT_MIN_WORDS]
             if cuts:
                 return min(cuts)
-        return m.end() if m else None
+        if m is None:
+            return None
+        word, complete = self._next_word(m.end())
+        lower = word.lower()
+        if not complete and (not word or any(a.startswith(lower) for a in ADDRESSES)):
+            return None  # "...mugged! S": a lone "Sir." may be on its way, to join this sentence
+        if complete and lower in ADDRESSES and re.match(r"\s*[A-Za-z]+\s*[.!?…]", self._buf[m.end():]):
+            return None  # "...mugged! Sir" + "." : join_address merges it on the next feed
+        return m.end()

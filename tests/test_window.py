@@ -96,6 +96,24 @@ class WindowTests(unittest.TestCase):
         self.press("pressMic")
         self.assertEqual(self.engine.calls[-1], ("set_listening", True))
 
+    def test_turn_off_the_mic_by_voice_turns_the_button_off(self):
+        """2026-11-18: "if I say turn off the mic, the mic button should be turned off"; a click
+        turns it back on."""
+        self.window.set_status(Status.LISTENING)
+        self.window.set_status(Status.MIC_OFF)  # the engine closed the mic itself
+        self.assertFalse(self.window.root.property("micOn"))
+        self.press("pressMic")
+        self.assertEqual(self.engine.calls, [("set_listening", True)])
+        self.assertTrue(self.window.root.property("micOn"))
+
+    def test_a_failed_answer_shows_error_then_listening(self):
+        self.window.set_status(Status.THINKING)
+        self.window.set_status(Status.ERROR)
+        self.assertIn("Error", self.window.root.property("statusText"))
+        self.assertEqual(self.window.root.property("mode"), "error")
+        self.window.set_status(Status.LISTENING)
+        self.assertEqual(self.window.root.property("statusText"), "Listening")
+
     def test_the_mic_button_does_nothing_while_loading(self):
         self.press("pressMic")
         self.assertEqual(self.engine.calls, [])

@@ -52,8 +52,10 @@ def _percent(value, noun: str) -> int:
     return round(number)
 
 
-def _validated(level, change, noun: str) -> tuple[int | None, int]:
-    """(absolute level or None, step). A level wins when both are given ("up to 50" is 50)."""
+def _validated(level, change, noun: str, by=None) -> tuple[int | None, int]:
+    """(absolute level or None, step). A level wins when both are given ("up to 50" is 50).
+    `by`: how far a change goes, in percent points ("lower the brightness by 50", the user,
+    2026-11-18); 10 when not given."""
     if level is not None:
         return _percent(level, noun), 0
     if change is None:
@@ -61,7 +63,8 @@ def _validated(level, change, noun: str) -> tuple[int | None, int]:
     direction = change.lower() if isinstance(change, str) else change
     if direction not in ("up", "down"):
         raise ToolError(f"{noun} can only go up or down.")
-    return None, STEP if direction == "up" else -STEP
+    step = STEP if by is None else _percent(by, f"How far the {noun.lower()} changes")
+    return None, step if direction == "up" else -step
 
 
 def _target(current: int, level: int | None, step: int) -> int:
@@ -181,13 +184,14 @@ def is_muted() -> bool:
 
 
 @tool(level=Level.SAFE, timeout=5.0, cloud=False)
-def set_volume(level: int | None = None, change: Literal["up", "down"] | None = None) -> str:
-    """Set the system volume to 0-100, or step it up or down.
+def set_volume(level: int | None = None, change: Literal["up", "down"] | None = None, by: int | None = None) -> str:
+    """Set the system volume to 0-100, or change it up or down.
 
     level: percent, 0 to 100
-    change: up or down by 10, instead of a level
+    change: up or down, instead of a level
+    by: how many percent a change goes up or down (10 if left out)
     """
-    absolute, step = _validated(level, change, "Volume")
+    absolute, step = _validated(level, change, "Volume", by)
     with _speakers() as speakers:
         current = round(_get_scalar(speakers) * 100)
         target = _target(current, absolute, step)
@@ -273,13 +277,15 @@ def get_brightness() -> int:
 
 
 @tool(level=Level.SAFE, timeout=8.0, cloud=False)
-def set_brightness(level: int | None = None, change: Literal["up", "down"] | None = None) -> str:
-    """Set the screen brightness to 0-100, or step it up or down.
+def set_brightness(level: int | None = None, change: Literal["up", "down"] | None = None,
+                   by: int | None = None) -> str:
+    """Set the screen brightness to 0-100, or change it up or down.
 
     level: percent, 0 to 100
-    change: up or down by 10, instead of a level
+    change: up or down, instead of a level
+    by: how many percent a change goes up or down (10 if left out)
     """
-    absolute, step = _validated(level, change, "Brightness")
+    absolute, step = _validated(level, change, "Brightness", by)
     current, target = _run_brightness(-1 if absolute is None else absolute, step)
     if target == current:
         return f"Brightness is already at {current}%."
@@ -683,6 +689,15 @@ def _nothing(m) -> dict:
     return {}
 
 
+def _by(m) -> dict:
+    """"lower the brightness by 50": down, 50 points."""
+    return {"change": _DIRECTION[m["d"]], "by": _number(m["n"])}
+
+
+_UP_DOWN = r"(?P<d>increase|raise|boost|decrease|lower|reduce|up|down)"
+_TURN = r"(?:turn|bring|put|crank|drop|take) "
+
+
 INTENTS = [
     # volume
     (_whole(rf"{_SET}(?:the |my )?(?:volume|sound)(?: level)?(?: (?:to|at|on|up to|down to))? {_NUM}"),
@@ -693,6 +708,11 @@ INTENTS = [
     (_whole(r"turn (?P<d>up|down) (?:the )?(?:volume|sound|music)"), "set_volume", _change),
     (_whole(r"(?:the )?(?:volume|sound) (?P<d>up|down)"), "set_volume", _change),
     (_whole(rf"(?:make it |make the music )?{_A_BIT}(?P<d>louder|quieter|softer)"), "set_volume", _change),
+    # "increase the volume to 100", "lower the volume by 20" (the user, 2026-11-18)
+    (_whole(rf"(?:increase|raise|boost|decrease|lower|reduce|drop|change) (?:the |my )?(?:volume|sound)(?: level)? to {_NUM}"),
+     "set_volume", _level),
+    (_whole(rf"{_UP_DOWN} (?:the |my )?(?:volume|sound)(?: level)? by {_NUM}"), "set_volume", _by),
+    (_whole(rf"{_TURN}(?:the |my )?(?:volume|sound) {_UP_DOWN} by {_NUM}"), "set_volume", _by),
     (_whole(r"(?P<d>increase|raise|boost|decrease|lower|reduce) (?:the )?(?:volume|sound)"), "set_volume", _change),
     # mute
     (_whole(r"(?P<d>mute|unmute)(?: (?:it|everything|(?:the )?(?:sound|volume|audio|speakers|music|laptop|computer)))?"),
@@ -709,6 +729,10 @@ INTENTS = [
      "set_brightness", _change),
     (_whole(rf"(?:turn )?{_SCREEN}brightness (?P<d>up|down)"), "set_brightness", _change),
     (_whole(rf"turn (?P<d>up|down) {_SCREEN}brightness"), "set_brightness", _change),
+    (_whole(rf"(?:increase|raise|boost|decrease|lower|reduce|drop|change) {_SCREEN}brightness(?: level)? to {_NUM}"),
+     "set_brightness", _level),
+    (_whole(rf"{_UP_DOWN} {_SCREEN}brightness(?: level)? by {_NUM}"), "set_brightness", _by),
+    (_whole(rf"{_TURN}{_SCREEN}brightness {_UP_DOWN} by {_NUM}"), "set_brightness", _by),
     (_whole(rf"(?P<d>increase|raise|boost|decrease|lower|reduce) {_SCREEN}brightness"), "set_brightness", _change),
     (_whole(r"(?P<d>dim|brighten)(?: (?:the|my) (?:screen|display))?"), "set_brightness", _change),
     # media

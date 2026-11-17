@@ -22,10 +22,10 @@ foreach ($url in $archives) {
   if ($LASTEXITCODE -ne 0) { throw "extract failed: $name" }
   Remove-Item $archive
 }
-# The Piper voice (engine = "piper", the default), on the CPU: the user picked this one by ear
-# from five on 2026-10-21, and the others were removed.
+# The Piper voice (engine = "piper", the default), on the CPU: semaine's Obadiah since 2026-11-18
+# (the steadiest of the British voices, config.py), and the northern voice the user had before.
 $piper = New-Item -ItemType Directory -Force (Join-Path $speech "piper")
-foreach ($voice in @("en_GB-northern_english_male-medium")) {
+foreach ($voice in @("en_GB-semaine-medium", "en_GB-northern_english_male-medium")) {
   $name = "vits-piper-$voice.tar.bz2"
   if (Test-Path (Join-Path $piper "vits-piper-$voice")) { Write-Host "skip $name (already extracted)"; continue }
   $archive = Join-Path $piper $name

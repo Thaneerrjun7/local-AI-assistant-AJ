@@ -151,8 +151,18 @@ class OfferTests(unittest.TestCase):
         self.assertEqual(self.b.answer_line("can you sing me a song"), BY_KEY["strings"].text)
         self.assertIsNone(self.b.answer_line("are you there yet with the download"))
 
+    def test_anything_else_now_and_then(self):
+        """The user's line (2026-11-18), after something he did, never two turns running."""
+        b = bank(rng=AlwaysLucky())
+        b.new_turn()
+        self.assertIn(b.after_tool("open_app"), POOLS["anything_else"])
+        b.new_turn()
+        self.assertIsNone(b.after_tool("open_app"))  # too soon
+        self.assertIsNone(bank(rng=AlwaysLucky()).after_tool("battery_status"))  # a reading, not a deed
+        self.assertIn("Sir, will there be anything else?", POOLS["anything_else"])
+
     def test_after_tool(self):
-        self.assertIsNone(self.b.after_tool("set_volume"))
+        self.assertIsNone(self.b.after_tool("battery_status"))
         said = []
         for _ in range(40):
             self.b.new_turn()
@@ -204,7 +214,7 @@ class VoiceTests(unittest.TestCase):
     def test_they_call_him_sir_or_boss(self):
         for pool, options in POOLS.items():
             for line in options:
-                self.assertRegex(line, r"\b(sir|boss)\b|Say yes or no", f"{pool}: {line}")
+                self.assertRegex(line, r"(?i)\b(sir|boss)\b|Say yes or no", f"{pool}: {line}")
 
     def test_hello_sir_on_two_claps(self):
         self.assertIn("Hello, sir.", POOLS["clap"])

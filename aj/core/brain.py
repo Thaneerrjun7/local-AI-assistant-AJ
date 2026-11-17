@@ -37,6 +37,7 @@ import re
 import sys
 import threading
 import time
+import urllib.error
 from collections import deque
 from collections.abc import Callable, Iterable
 from datetime import datetime
@@ -84,6 +85,7 @@ _SAY_AS_IS = {"start_dictation", "type_text", "type_that", "polish_typed", "what
 # find an app called Photoshop."). Live (2026-10-23) the model called switch_to_app for "open
 # Chrome" and then said only "What do you need?", so the user couldn't tell whether anything opened.
 _APP_TOOLS = {"open_app", "switch_to_app", "close_app", "list_apps"}
+_WANTS_AN_APP = re.compile(r"\b(?:open|launch|start|run|pull up|bring up|switch to|close)\b", re.IGNORECASE)
 # Tools that put words where the cursor is: after one of them, a chat that just opened needs no dictation.
 _TYPES = {"start_dictation", "type_text", "type_that", "polish_typed"}
 # What the model is told when it opened a chat itself: the question and the listening are done in code.
@@ -121,6 +123,17 @@ _NOT_TRIED = ("[Check: you said you can't open it, or that it isn't available, b
 _RECHECK_HOW = ("[You doubted yourself, so you just took that reading again; it's above. Answer from this fresh "
                 "result only. If your last answer was wrong, admit it in a few words; if it was right, say so "
                 "plainly, without arguing.]")
+# "Sir, will there be anything else?" is said by code now and then after an action (aj/lines.py).
+# Live (2026-11-18) the model saw it in the history and copied it: for "Go to the tab with the
+# YouTube on it" it wrote a made-up "Switching to the YouTube tab." (dropped as untrue) and that
+# line, which was all that was said. So the model never says it, and never sees it in the history.
+_ANYTHING_ELSE = re.compile(r"\s*\b(?:(?:sir|boss),\s*)?will there be anything else(?:,\s*(?:sir|boss))?\s*\?",
+                            re.IGNORECASE)
+_PICK_HOW = ("[Your last reply said something was done, but no tool ran. Choose the one tool that does what the "
+             "user asked in their last message, with its arguments, from this list. If none of them can, the tool "
+             "is \"none\".\n{catalogue}]")
+_PICK_SCHEMA = {"type": "object", "properties": {"tool": {"type": "string"}, "arguments": {"type": "object"}},
+                "required": ["tool", "arguments"]}
 _SPEAK_DIRECTLY_MAX = 160
 WAIT_LINE_AFTER_SECS = 0.6
 SAME_PLACE_TURNS = 3  # a weather follow-up without a place keeps the last one for this many turns
@@ -204,6 +217,7 @@ class Brain:
         self._readings: list[tuple[str, object]] = []       # this turn's
         self._notes: list[str] = []  # what happened since the last turn (an app that didn't open)
         self._budget: int | None = None  # this turn's max_tokens (persona.reply_budget)
+        self._history_sent = 0  # history messages in the last prompt built (_trim drops from them)
         self._cut_off = False  # the model's last reply hit the budget mid-sentence
         self._notes_lock = threading.Lock()
         self._warm = threading.Event()  # the prompt is in the model's cache (set when warm_up ends)
@@ -269,7 +283,22 @@ class Brain:
                 content = f"[Laptop now: {self._laptop}]\n{content}"
         if self._show_time:
             content = f"[Now: {datetime.now().strftime('%A %d %B %Y, %I:%M %p')}]\n{content}"
+        self._history_sent = len(recent)  # what _trim may drop if the model says it's too long
         return [{"role": "system", "content": self._system_prompt()}, *recent, {"role": "user", "content": content}]
+
+    def _trim(self, messages: list[dict]) -> bool:
+        """The model refused the prompt (HTTP 400; live 2026-11-18: 8,249 tokens against the
+        8,192 it had): the older half of the history goes, in place, so the rest of this turn's
+        requests are shorter too. False when there's no history left to drop."""
+        sent = min(self._history_sent, max(0, len(messages) - 2))
+        if sent <= 0:
+            return False
+        drop = max(2, sent // 2) if sent > 2 else sent
+        del messages[1:1 + drop]
+        self._history_sent = sent - drop
+        print(f"(The prompt was too long for the model: left out the {drop} oldest messages and tried again.)",
+              flush=True)
+        return True
 
     def warm_up(self, base: str | None = None) -> None:
         """Load the persona (and tool list) into the model's cache so the first real turn is fast.
@@ -355,7 +384,7 @@ class Brain:
                 chunk, opener = opener + chunk, ""
                 # "Computer: I am your friend.": the prompt's example labels, echoed (2026-10-21);
                 # since the rename to AJ (2026-10-22) any of his names, old or new.
-                chunk = self._labels.sub("", chunk).strip()
+                chunk = _ANYTHING_ELSE.sub("", self._labels.sub("", chunk)).strip()
                 if not chunk:
                     continue
                 chunk = self.delivery.shape(chunk)
@@ -430,7 +459,7 @@ class Brain:
             spoken = self._conversation(user_text, mouth, times)
         spoken = strip_marks(spoken)  # voice marks ([chuckle], [pause]) are for the ears, not the transcript
         self.history += [{"role": "user", "content": self._user_message(user_text)},
-                         {"role": "assistant", "content": spoken}]
+                         {"role": "assistant", "content": _ANYTHING_ELSE.sub("", spoken).strip() or spoken}]
         if self.memory is not None and self.typed_turn is None:  # "type <words>": his message, not a fact
             self.memory.after_turn(user_text, spoken)
         if self.dictation is not None:
@@ -506,7 +535,8 @@ class Brain:
         from aj.tools import intents
         hit = intents.match(user_text) or self._weather_follow_up(user_text)
         if hit is None:
-            return None
+            several = intents.match_all(user_text)
+            return self._several(several, mouth, times) if several else None
         tool, args = hit
         if tool == "get_weather":
             args = self._same_place(args)
@@ -535,6 +565,22 @@ class Brain:
             return self._relay_tool_result(user_text, tool, result, mouth, times)
         extra = None if failed else self.lines.after_tool(tool)
         return self._say_line(f"{result} {extra}" if extra else str(result), mouth, times)
+
+    def _several(self, hits: list[tuple[str, dict]], mouth, times) -> str | None:
+        """Two or more commands in one breath ("lower the brightness by 50% and increase the volume
+        to 100%", the user, 2026-11-18), each one the fast path knows: done in order, and each
+        result said. Commands whose result needs the model (a search to sum up, a forecast to
+        answer from) or that take over the conversation (typing, a chat) go to the model instead."""
+        if any(tool in _SUMMARISE or tool in _ANSWER_FROM or tool in _TYPES or tool == "whatsapp_open_chat"
+               for tool, _ in hits):
+            return None
+        said = []
+        for tool, args in hits:
+            result = self._run_tool(tool, args, mouth, times)
+            self._ran(tool, args, result)
+            outcome = getattr(result, "outcome", "ok")
+            said.append(str(result) if outcome in ("ok", "error") else self._failure_line(tool, outcome))
+        return self._say_line(" ".join(said), mouth, times)
 
     def _weather_follow_up(self, user_text: str) -> tuple[str, dict] | None:
         """"And tomorrow?" within two turns of a forecast: the forecast for that day."""
@@ -603,18 +649,55 @@ class Brain:
         cached prompt prefix always fits. With `calls` None, tools are offered but not taken.
         `raw` collects the words as written, before anything is dropped."""
         self._warm.wait(30)  # the warm-up is still reading the prompt: one request at a time
-        for kind, value in stream_events(self.base, messages, self.settings, tools=self._tool_list(),
-                                         cancel=self.cancel, temperature=temperature,
-                                         tool_choice="auto" if calls is not None else "none",
-                                         max_tokens=self._budget):
-            if kind == "text":
-                if raw is not None:
-                    raw.append(value)
-                yield value
-            elif kind == "finish":
-                self._cut_off = value == "length"
-            elif calls is not None:
-                calls.extend(value)
+        while True:
+            started = False
+            try:
+                for kind, value in stream_events(self.base, messages, self.settings, tools=self._tool_list(),
+                                                 cancel=self.cancel, temperature=temperature,
+                                                 tool_choice="auto" if calls is not None else "none",
+                                                 max_tokens=self._budget):
+                    started = True
+                    if kind == "text":
+                        if raw is not None:
+                            raw.append(value)
+                        yield value
+                    elif kind == "finish":
+                        self._cut_off = value == "length"
+                    elif calls is not None:
+                        calls.extend(value)
+                return
+            except urllib.error.HTTPError as exc:
+                # Refused before a word was said: again with less history, while there is some.
+                if exc.code != 400 or started or not self._trim(messages):
+                    raise
+
+    def _pick_tool(self, messages: list[dict], said: str) -> tuple[str, dict] | None:
+        """The tool the model picks under a JSON grammar, after a reply that claimed an action no
+        tool did; None for "none", or when the pick fails. On slot 1, the background slot, so the
+        conversation's prompt cache on slot 0 is left alone."""
+        from aj.memory import slot
+        from aj.tools import registry
+        names = [t["function"]["name"] for t in self._tool_list() or []]
+        if not names:
+            return None
+        specs = {s.name: s for s in registry.specs()}
+        catalogue = "\n".join(
+            f"- {n}({', '.join(p.name for p in specs[n].params)}): {specs[n].description.splitlines()[0]}"
+            for n in names if n in specs)
+        schema = {**_PICK_SCHEMA, "properties": {**_PICK_SCHEMA["properties"],
+                                                  "tool": {"type": "string", "enum": [*names, "none"]}}}
+        ask = [*messages, {"role": "assistant", "content": said or "(nothing)"},
+               {"role": "user", "content": _PICK_HOW.format(catalogue=catalogue)}]
+        try:
+            picked = json.loads(slot.complete(self.base, ask, max_tokens=150, schema=schema, timeout=20))
+        except (OSError, ValueError) as exc:
+            print(f"(Picking a tool failed: {exc})", flush=True)
+            return None
+        tool, args = picked.get("tool"), picked.get("arguments")
+        if tool not in names or not isinstance(args, dict):
+            return None
+        print(f"(The model claimed an action without a tool; picked {tool} under a grammar.)", flush=True)
+        return tool, args
 
     def _relay(self, content: str, user_text: str, mouth, times) -> str:
         self.delivery.strict = False  # the facts asked for again are the point, not a repeat
@@ -670,10 +753,21 @@ class Brain:
                 if calls is not None and not nudged and (self.delivery.false_actions or refused) \
                         and not self.delivery.acted:
                     nudged = True
-                    messages = messages + [{"role": "assistant", "content": "".join(raw)},
-                                           {"role": "user", "content": _NOT_TRIED if refused else _NOTHING_DONE}]
-                    continue
-                break
+                    # 2026-11-18, live: "Yeah, do that." (open YouTube, as he'd just offered) got
+                    # "Opening YouTube" with no tool. Asked again in words, the 4B model often answers
+                    # in words again, and this llama.cpp build ignores tool_choice "required"
+                    # (measured). So the model is asked once more under a JSON grammar, which it
+                    # can't answer in words: the one tool that does what was asked, or none.
+                    picked = self._pick_tool(messages, "".join(raw))
+                    if picked is not None:
+                        calls.append({"id": f"call_pick_{round_}", "name": picked[0],
+                                      "arguments": json.dumps(picked[1], ensure_ascii=False)})
+                    else:
+                        messages = messages + [{"role": "assistant", "content": "".join(raw)},
+                                               {"role": "user", "content": _NOT_TRIED if refused else _NOTHING_DONE}]
+                        continue
+                if not calls:
+                    break
             tool_calls = [{"id": c["id"] or f"call_{round_}_{i}", "type": "function",
                            "function": {"name": c["name"], "arguments": c["arguments"] or "{}"}}
                           for i, c in enumerate(calls)]
@@ -693,7 +787,11 @@ class Brain:
                     elif name in _TYPES:
                         chat_opened = False
                 messages.append({"role": "tool", "tool_call_id": call["id"], "content": content})
-            if all(name in _APP_TOOLS for name, _ in results):
+            # An app tool's result is the answer, but list_apps may only be a lookup on the way to
+            # opening one ("open the app I use for spreadsheets", scripts/check_tool_picks.py,
+            # 2026-11-18: the turn ended on the app list, and nothing opened).
+            looked_up = all(name == "list_apps" for name, _ in results) and _WANTS_AN_APP.search(user_text)
+            if all(name in _APP_TOOLS for name, _ in results) and not (looked_up and round_ < MAX_TOOL_ROUNDS - 1):
                 lines = [str(r) if getattr(r, "outcome", "ok") in ("ok", "error")
                          else self._failure_line(n, getattr(r, "outcome", "ok")) for n, r in results]
                 parts.append(self._say_line(" ".join(lines), mouth, times))

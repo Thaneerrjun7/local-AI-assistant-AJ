@@ -119,7 +119,7 @@ class FakeDesktop:
                     runtime_id=(5, 1))
 
     def value(self):
-        return ""
+        return "".join(self.typed)  # what a real box would show: type_into reads it back (2026-11-18)
 
     def caret_at_end(self):
         return True
@@ -1019,6 +1019,7 @@ class PromiseTests(unittest.TestCase):
         class KeysDesktop(FakeDesktop):
             def type(self, text, multiline=False):
                 keyboard.type_text(text, multiline=multiline)
+                self.typed.append(text)  # the box shows it, for type_into's read-back
 
             def focused_box(self):  # Notepad's text area: a document, so it takes line breaks
                 return Node(control_type="Document", has_text=True, focusable=True, runtime_id=(5, 2))

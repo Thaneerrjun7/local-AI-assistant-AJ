@@ -65,8 +65,14 @@ def rounds(*each):
     return lambda *a, **k: iter(next(left))
 
 
+class Unlucky(random.Random):
+    def random(self) -> float:
+        return 0.99  # nothing left to chance is ever added ("Sir, will there be anything else?")
+
+
 class BrainTests(unittest.TestCase):
     def make(self, **kw):
+        kw.setdefault("lines", Lines(path=None, rng=Unlucky()))
         b = brain_mod.Brain("http://x", Settings(), **kw)
         b._tools = []  # don't touch the real registry
         return b

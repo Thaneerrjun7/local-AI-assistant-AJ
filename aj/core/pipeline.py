@@ -31,6 +31,7 @@ import queue
 import re
 import threading
 import time
+import traceback
 import wave
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -60,6 +61,35 @@ _OFF = re.compile(r"^\W*((?:all\W*right|ok(?:ay)?|right|so|then)\W+)?(hey\W+)?((
                   r"((turn|switch|power)\W+(yourself\W+)?off|shut\W*(yourself\W+)?down|go\W+dark|good\W*bye|"
                   r"de\W*activate(\W+yourself)?)"
                   r"(\W+(computer|aj|now|please))*\W*$", re.IGNORECASE)
+
+
+# Voice control, done here before the model hears it (the user, 2026-11-18):
+# - "turn off the mic", "mute", "mute me": he stops talking at once and the mic goes off. Only
+#   the window's mic button turns it back on ("I do not want to say turn on the mic").
+# - "mute yourself", "stop talking": he stops talking; the mic stays on.
+# Live the same day "off your mic." went to the model, which said "Mic is off, sir." with the mic on.
+# "No, mute yourself." (live, 2026-11-18) went to the model, which claimed it was done: a "no",
+# "stop" or "actually" before the command is a lead-in too.
+_LEAD = (r"^\W*(?:(?:ok(?:ay)?|right|so|please|hey|now|just|can you|could you|would you|will you|no|nah|nope|stop|"
+         r"actually|wait|yeah|yes|i said|i told you to|enough)\W+)*")
+_TAIL = r"(?:\W+(?:please|now|for now|for a bit|for a while|thanks|thank you|aj|computer))*\W*$"
+_MIC = r"(?:mic|microphone|mike)"
+_MIC_OFF = re.compile(
+    _LEAD + r"(?:(?:turn|switch|shut|put|cut)\W+(?:off|down)\W+(?:the\W+|your\W+|my\W+)?" + _MIC +
+    r"|(?:turn|switch|shut|cut)\W+(?:the\W+|your\W+|my\W+)?" + _MIC + r"\W+(?:off|down)"
+    r"|(?:the\W+|your\W+)?" + _MIC + r"\W+off|off\W+(?:the\W+|your\W+)" + _MIC +
+    r"|mute(?:\W+(?:me|myself|it|the\W+" + _MIC + r"|your\W+" + _MIC + r"))?"
+    r"|stop\W+listening(?:\W+to\W+me)?)" + _TAIL, re.IGNORECASE)
+_HUSH = re.compile(
+    _LEAD + r"(?:mute\W+yourself|stop\W+(?:talking|speaking)|be\W+quiet|quiet|hush|shush|shh+|shut\W+up|"
+    r"silence|enough|that'?s\W+enough)" + _TAIL, re.IGNORECASE)
+
+
+def voice_control(text: str) -> str | None:
+    """"mic off" (stop talking, mic off), "hush" (stop talking) or None, for the whole utterance."""
+    if _MIC_OFF.search(text):
+        return "mic off"
+    return "hush" if _HUSH.search(text) else None
 
 
 _YES = re.compile(r"^\W*(?:(?:uh|um|ok|okay|yeah)\W+)?(?:yes|yeah|yep|yup|sure|do it|go ahead|confirm(?:ed)?|"
@@ -100,21 +130,28 @@ class Status(StrEnum):
     ASLEEP = "asleep"
     ASLEEP_ON_BATTERY = "asleep on battery"
     ASLEEP_MIC_OFF = "asleep, mic off"
+    # An answer failed (2026-11-18: the model refused a prompt that had grown too long, and the
+    # window sat on Thinking for good). Shown for a few seconds after he says so; then he listens.
+    ERROR = "error"
 
 
 ASLEEP_STATUSES = frozenset({Status.ASLEEP, Status.ASLEEP_ON_BATTERY, Status.ASLEEP_MIC_OFF})
 
 
 def pick_status(listening: bool, answering: bool, hearing: bool, speaking: bool, dictating: bool = False,
-                asleep: bool = False, unplugged: bool = False, mic_failed: bool = False) -> Status:
+                asleep: bool = False, unplugged: bool = False, mic_failed: bool = False,
+                failed: bool = False) -> Status:
     """Hearing you wins over everything (with headphones you can talk over him); a typed
     question still gets Thinking/Speaking with the mic off. Waiting for dictation shows as such,
     even while he talks, so he knows his words will be typed, not answered. Asleep, talk in the
     room isn't "hearing you": it's only listened to for the name. `unplugged`: asleep with the
     mic closed because the laptop is on battery. `mic_failed`: the mic is wanted but wouldn't
-    open; that shows whenever nothing is being answered, asleep or awake."""
+    open; that shows whenever nothing is being answered, asleep or awake. `failed`: an answer
+    just failed (Status.ERROR for a few seconds), unless he's already hearing the next thing."""
     if mic_failed and not answering:
         return Status.MIC_FAILED
+    if failed and not answering and not (listening and hearing):
+        return Status.ERROR
     if asleep and not answering:
         if unplugged:
             return Status.ASLEEP_ON_BATTERY
@@ -154,7 +191,19 @@ class TurnTimes:
         return " · ".join(parts) + " ms" if parts else ""
 
 
-_MODE_LINES = {"wake": "Yes, sir?", "sleep": "Very good, sir. Call when you need me.", "clap": "Hello, sir."}
+def _plain_error(exc: Exception) -> str:
+    """What went wrong, in a few words for the window (the log has the whole traceback)."""
+    code = getattr(exc, "code", None)
+    if code == 400:
+        return "the model refused the request"
+    if isinstance(exc, (TimeoutError, ConnectionError)) or "timed out" in str(exc):
+        return "the model took too long to answer"
+    return f"{type(exc).__name__}: {str(exc)[:80]}"
+
+
+ERROR_SHOW_SECS = 5.0
+_MODE_LINES = {"wake": "Yes, sir?", "sleep": "Very good, sir. Call when you need me.", "clap": "Hello, sir.",
+               "failed": "Sorry, sir, something went wrong on my side."}
 
 
 def mode_line(lines, pool: str) -> str:
@@ -336,6 +385,8 @@ class Session:
         self._settle = False  # an answer just ended: reset the ears before listening on
         self._answer_to: Callable[[bool], None] | None = None  # a yes/no question waiting for a spoken answer
         self._mic_failed = False  # the mic is wanted but wouldn't open
+        self._failed_until = 0.0  # an answer failed: Status.ERROR until then
+        self.last_error = ""      # what went wrong, in plain words
         self._mic_retry_at = 0.0  # when to try it again
 
     def set_listening(self, on: bool) -> None:
@@ -621,7 +672,8 @@ class Session:
         dictating = self.dictation is not None and self.dictation.armed is not None
         unplugged = self.asleep and self._listening and not mic_on and not self._mic_failed
         status = pick_status(mic_on, answering, hearing, speaking, dictating, self.asleep, unplugged,
-                             mic_failed=self._mic_failed and not mic_on)
+                             mic_failed=self._mic_failed and not mic_on,
+                             failed=time.perf_counter() < self._failed_until)
         if status != self._status:
             self._status = status
             if self.on_status:
@@ -634,14 +686,19 @@ class Session:
     def _route(self, text: str, times: TurnTimes, audio: list[np.ndarray] | None = None,
                typed: bool = False) -> bool:
         """What was said (or typed), past sleep mode first. False: dropped (asleep, not its name)."""
-        if self.gate is None or (typed and self._dictating()):  # typed while dictating: the message
+        if typed and self._dictating():  # typed while dictating: the message
             self._start_answer(text, times, audio)
+            return True
+        if self.gate is None:
+            if not self._voice_control(split_wake(text)[1], text, times):
+                self._start_answer(text, times, audio)
             return True
         heard = self.gate.route(text, typed=typed)
         if heard.action == Heard.IGNORE:
             return False
         if heard.action == Heard.ANSWER:
-            self._start_answer(heard.text, times, audio, said=text)
+            if not self._voice_control(heard.text, text, times):
+                self._start_answer(heard.text, times, audio, said=text)
         else:
             self._start_turn(self._say_mode_line, ("wake" if heard.action == Heard.WAKE else "sleep", text, times))
         return True
@@ -665,6 +722,26 @@ class Session:
             self.gate.sleep()
         else:
             self.gate.wake()
+
+    def _voice_control(self, command: str, said: str, times: TurnTimes) -> bool:
+        """"Turn off the mic" / "mute": silent at once and the mic off; "mute yourself": silent.
+        Done on the loop thread, so it doesn't wait for an answer still being written: that
+        answer is cut off. True if the command was one of these."""
+        what = voice_control(command)
+        if what is None:
+            return False
+        self.brain.cancel.set()
+        if self.mouth is not None:
+            self.mouth.silence()
+        if self.dictation is not None and what == "mic off":
+            self.dictation.abort()  # nothing more is typed either
+        if self.on_heard:
+            self.on_heard(said)
+        if what == "mic off":
+            self.set_listening(False)  # the window's mic button shows it, and turns it back on
+        if self.on_turn:
+            self.on_turn(said, "(mic off)" if what == "mic off" else "(quiet)", times)
+        return True
 
     def _clapped(self, block: np.ndarray | None, busy: bool) -> bool:
         """Asleep and not answering: the block goes to the clap detector, and two claps wake him.
@@ -695,8 +772,32 @@ class Session:
             self._barge.reset()
         self.quiet.clear()  # the answer clears it too; doing it here flips the status at once
         self._turn_started = time.perf_counter()
-        self._worker = threading.Thread(target=work, args=args, daemon=True)
+        self._worker = threading.Thread(target=self._guarded, args=(work, args), daemon=True)
         self._worker.start()
+
+    def _guarded(self, work: Callable, args: tuple) -> None:
+        """An answer that fails says so and shows Error for a few seconds, then he listens again.
+        Until 2026-11-18 the exception ended the thread with "quiet" never set, so the window
+        showed Thinking for good (live: the model refused a prompt that had grown too long)."""
+        try:
+            work(*args)
+        except Exception as exc:  # noqa: BLE001 - any failure: told, shown, and the turn ends
+            traceback.print_exc()
+            self._failed_until = time.perf_counter() + ERROR_SHOW_SECS
+            self.last_error = _plain_error(exc)
+            line = mode_line(getattr(self.brain, "lines", None), "failed")
+            try:
+                if self.mouth is not None and not self.stop.is_set():
+                    self.mouth.say(clean_for_speech(line))
+                    self.mouth.wait_done()
+            except Exception:  # noqa: BLE001 - the voice failing too must not stop the turn ending
+                pass
+            if self.on_turn:
+                said = args[0] if args and isinstance(args[0], str) else ""
+                self.on_turn(said, f"{line} ({self.last_error})", TurnTimes(stopped_talking=time.perf_counter()))
+            self._settle = True
+        finally:
+            self.quiet.set()
 
     def _finish_answer(self) -> None:
         """Wait for the last answer. If AJ was switched off mid-answer, keep cutting it

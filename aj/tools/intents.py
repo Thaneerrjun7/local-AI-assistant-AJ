@@ -93,6 +93,23 @@ def match(transcript: str) -> tuple[str, dict] | None:
     return None
 
 
+# Two or more commands in one breath (the user, 2026-11-18: "lower the brightness by 50% and increase
+# the volume to 100%"). Split at "and", "then", "also", a comma before one of them, or a full stop.
+_JOINED = re.compile(r"\s*,?\s*\b(?:and then|and also|and after that|after that|and|then|also|plus)\b\s*|(?<=[.!?;])\s+",
+                     re.IGNORECASE)
+MAX_COMMANDS = 4
+
+
+def match_all(transcript: str) -> list[tuple[str, dict]] | None:
+    """Every command in "do this and that", in order, when each part is one the fast path knows on
+    its own; None otherwise (one command is match()'s job: "play rock and roll on youtube" is one)."""
+    parts = [p for p in _JOINED.split(transcript.strip()) if p and p.strip(" ,.")]
+    if not 2 <= len(parts) <= MAX_COMMANDS or match(transcript) is not None:
+        return None
+    hits = [match(p) for p in parts]
+    return hits if all(hits) else None
+
+
 def _candidates(transcript: str) -> list[str]:
     """The normalized transcript, then its last sentence if it has more than one."""
     whole = normalize(transcript)

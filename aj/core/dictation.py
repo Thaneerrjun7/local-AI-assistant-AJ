@@ -101,6 +101,8 @@ REFUSED = "Windows stopped me typing there. Check the box."
 MOVED_AWAY = "The cursor left that box, so I stopped. Part of it is typed."
 STOPPED = "Stopped. Nothing typed."
 STOPPED_PART = "Stopped, so only part of it is typed. Check the box."
+PART_LOST = "Only part of it went in: that app was busy. Check the box before you send it."
+LANDED_WAIT = 1.0  # seconds a busy app gets to show what was typed (_landed)
 KEYS_HELD = "A key was still held down, so I didn't type. Let go of it and say type that."
 SPEAK_BUSY = "AJ (Speak) is listening right now, so I won't take dictation too. Finish that first."
 NOT_AT_END = ("Your cursor isn't at the end of what I typed, so I left it as it is. "
@@ -686,6 +688,8 @@ def type_into(hwnd: int, text: str, how: str = "plain", offline: bool = False,
     multiline = takes_line_breaks(box, whatsapp)
     if not multiline:
         text = as_single_line(text)
+    reads = getattr(desktop, "value", None)
+    before = reads() if reads else None
     for i, piece in enumerate(_chunks(text)):
         if _stopped(cancel):
             if i:
@@ -704,8 +708,30 @@ def type_into(hwnd: int, text: str, how: str = "plain", offline: bool = False,
             if isinstance(exc, ModifiersHeld):
                 return Outcome(False, "keys_held", KEYS_HELD, text, hwnd, whatsapp)
             return Outcome(False, "refused", REFUSED, text, hwnd, whatsapp)
+    if before is not None and not _landed(reads, text):
+        return Outcome(False, "lost", PART_LOST, text, hwnd, whatsapp)
     line = done_line(whatsapp, how)
     return Outcome(True, "typed", f"{OFFLINE} {line}" if offline else line, text, hwnd, whatsapp)
+
+
+def _letters(text: str) -> str:
+    return "".join(c for c in text.casefold() if c.isalnum())
+
+
+def _landed(reads, text: str, wait: float = LANDED_WAIT) -> bool:
+    """Did the words reach the box? Keys are sent, not received: an app still starting up dropped
+    8 of 13 characters and "Typed it." was said anyway (scripts/check_tools.py, 2026-11-18, Notepad
+    restoring its tabs). The box is read back, letters and digits only, for up to `wait` seconds while
+    the app catches up. A box that can't be read (None) is given the benefit of the doubt."""
+    want = _letters(text)
+    deadline = time.monotonic() + wait
+    while True:
+        now = reads()
+        if now is None or want in _letters(now):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.1)
 
 
 def _field_text(value: str) -> str:

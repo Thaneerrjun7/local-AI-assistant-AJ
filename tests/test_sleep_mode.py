@@ -216,6 +216,56 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(clap.fed, 0)
         self.assertEqual(self.events.turns, [])
 
+    def test_turn_off_the_mic_closes_it_without_the_model(self):
+        """2026-11-18, live: "off your mic." went to the model, which said "Mic is off, sir." with
+        the mic on. Now it's done here: he stops, and the mic closes until the button opens it."""
+        self.start()
+        self.say("Off your mic.")
+        self.assertTrue(wait_until(lambda: not self.mic.is_open))
+        self.assertTrue(wait_until(lambda: self.status() == Status.MIC_OFF))
+        self.assertEqual(self.brain.asked, [])
+        self.assertEqual(self.events.turns, [("Off your mic.", "(mic off)")])
+        self.session.set_listening(True)  # the window's button
+        self.assertTrue(wait_until(lambda: self.mic.is_open))
+
+    def test_mute_while_he_talks_stops_him(self):
+        self.start()
+        self.say("AJ, mute.")
+        self.assertTrue(wait_until(lambda: not self.mic.is_open))
+        self.assertTrue(self.brain.cancel.is_set())  # an answer being written is cut off
+        self.assertEqual(self.brain.asked, [])
+
+    def test_mute_yourself_only_stops_him_talking(self):
+        self.start()
+        self.say("Mute yourself.")
+        self.assertTrue(wait_until(lambda: ("Mute yourself.", "(quiet)") in self.events.turns))
+        time.sleep(0.2)
+        self.assertTrue(self.mic.is_open)  # still listening
+        self.assertEqual(self.brain.asked, [])
+
+    def test_a_failed_answer_shows_error_then_listens(self):
+        """2026-11-18, live: the model refused a prompt (HTTP 400), the answer thread died and the
+        window showed Thinking for good."""
+        self.start()
+        def broken(text, mouth, times):
+            raise RuntimeError("model said no")
+        self.brain.reply = broken
+        with mock.patch.object(pipeline, "ERROR_SHOW_SECS", 0.4), contextlib.redirect_stderr(io.StringIO()):
+            self.say("What's the weather?")
+            self.assertTrue(wait_until(lambda: self.status() == Status.ERROR))
+            self.assertTrue(wait_until(lambda: self.status() == Status.LISTENING))
+        said, reply = self.events.turns[-1]
+        self.assertEqual(said, "What's the weather?")
+        self.assertIn("<failed>", reply)
+        self.assertIn("model said no", reply)
+        self.assertTrue(self.session.quiet.is_set())
+
+    def test_go_to_sleep_with_a_hello_still_sleeps(self):
+        self.start()
+        self.say("Go to sleep. Hello.")
+        self.assertTrue(wait_until(lambda: self.status() == Status.ASLEEP))
+        self.assertEqual(self.brain.asked, [])
+
     def test_go_to_the_tray_is_going_to_sleep(self):
         self.start()
         self.say("AJ, go to the tray.")

@@ -152,6 +152,10 @@ class AJWindow(QObject):
             self._begin_closing(still_loading=False)
         elif not self._closing:
             was_asleep = self.status in ASLEEP_STATUSES
+            if status in (Status.MIC_OFF, Status.ASLEEP_MIC_OFF) and self._mic_on:
+                # "Turn off the mic" (core/pipeline.py, 2026-11-18): the engine switched it off, so
+                # the button shows off too, and a click turns it back on.
+                self._mic_on = False
             self._show_status(status)
             if status in ASLEEP_STATUSES and not was_asleep:
                 self.hide()  # to the tray

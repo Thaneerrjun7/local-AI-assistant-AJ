@@ -98,11 +98,17 @@ class VoiceSettings:
     chatterbox_threads: int = 8  # CPU threads for it (the Ryzen 7 7840HS has 8 cores, 16 threads)
     # "piper": a Piper voice on the CPU (no graphics memory), from models/speech/piper (2026-10-19)
     piper_dir: str = str(SPEECH_DIR / "piper")
-    piper_voice: str = "vits-piper-en_GB-northern_english_male-medium"  # a folder in piper_dir (the user's pick)
-    piper_speaker: int = 0  # for the voices with several speakers (semaine, southern_english_male)
-    piper_speed: float = 1.0
-    piper_noise: float = 0.667    # Piper's variation in delivery: lower is steadier and clearer, flatter
-    piper_noise_w: float = 0.8    # its variation in timing
+    # Obadiah, one of semaine's four speakers (2026-11-18). The user, of the northern voice: "his sir
+    # looks like it's someone else speaking", "his accent isn't really a British accent". Measured
+    # on the same five lines, as AJ chunks them (scripts/voice_samples.py): the northern voice's
+    # pitch jumped 3.0 semitones from piece to piece and speech-to-text caught 53 of 58 words;
+    # Obadiah's moved 0.4 semitones, with 58 of 58, the steadiest of 17 British voices (Kokoro's
+    # Daniel 0.5, alan 0.8), and he starts in about 65 ms on the CPU.
+    piper_voice: str = "vits-piper-en_GB-semaine-medium"  # a folder in piper_dir
+    piper_speaker: int = 2  # for the voices with several speakers: semaine 2 is Obadiah (1 Spike)
+    piper_speed: float = 1.4  # the user, 2026-11-18: "increase his speed a bit more", then "make the speed 1.4"
+    piper_noise: float = 0.45     # Piper's variation in delivery (its own default 0.667): lower is steadier
+    piper_noise_w: float = 0.6    # its variation in timing (default 0.8)
     piper_threads: int = 4
     kokoro_dir: str = str(SPEECH_DIR / "kokoro-multi-lang-v1_0")
     speaker_id: int = 24  # bm_daniel: the user's pick of the British voices by ear (2026-10-06), over

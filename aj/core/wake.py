@@ -213,13 +213,16 @@ def split_wake(transcript: str, words: WakeWords = DEFAULT) -> tuple[bool, str]:
 
 # ---- going to sleep ----
 
+# A greeting or goodbye said with it counts too (live, 2026-11-18: "Go to sleep. Hello." went to
+# the model, which said "Sleeping well, sir. Goodnight." and didn't sleep).
 _POLITE_START = re.compile(
-    r"^(?:(?:please|ok|okay|alright|all right|right|so|now|just|and|uh+|um+|hey|then|well|yeah|"
+    r"^(?:(?:please|ok|okay|alright|all right|right|so|now|just|and|uh+|um+|hey|then|well|yeah|hello|hi|"
     r"(?:can|could|would|will) you|you can|you may|you should|why dont you|why not|i want you to|"
     r"i need you to|go ahead and|its time to|it is time to|time to)\s+)+")
 _POLITE_END = re.compile(
     r"(?:\s+(?:please|now|right now|then|for now|for a bit|for a while|for the night|for tonight|"
-    r"again|thanks|thank you|buddy|friend|mate|ok|okay))+$")
+    r"again|thanks|thank you|buddy|friend|mate|ok|okay|hello|hi|bye|bye bye|goodbye|good bye|good ?night|"
+    r"see you|see you later|see ya|cheers|sir))+$")
 _SLEEP = re.compile(
     r"(?:go|get|head)(?: back)?(?: to| into)? sleep(?: mode| mod)?"
     r"|(?:back )?to sleep(?: mode)?"

@@ -159,7 +159,13 @@ INTENTS = [
     # a step down / up
     (_whole(rf"(?:turn|bring|dial|tone|take|knock) {_HUMOR} down{_BIT}|(?:turn|bring|dial|tone|take|knock) down "
             rf"{_HUMOR}{_BIT}|(?:lower|reduce|decrease|drop) {_HUMOR}{_BIT}|humou?r down"
-            r"|(?:a bit |a little )?(?:less|fewer|not so many) (?:jokes?|joking|humou?r)|be less funny"),
+            r"|(?:a bit |a little )?(?:less|fewer|not so many) (?:jokes?|joking|humou?r)|be less funny"
+            # "tone down the jokes a bit" (scripts/check_tool_picks.py, 2026-11-18: the model said
+            # "Humor at 45 percent" without changing it)
+            r"|(?:tone|dial|turn|bring|knock|cut|take) (?:down|back) (?:the |your |on the )?(?:jokes?|joking|humou?r|sarcasm)"
+            r"(?: (?:a bit|a little|a tad|slightly|a notch))?"
+            r"|(?:tone|dial|turn|bring|knock|cut|take) (?:the |your )?(?:jokes?|joking|humou?r|sarcasm) (?:down|back)"
+            r"(?: (?:a bit|a little|a tad|slightly|a notch))?|be (?:a bit |a little )?more serious|less sarcasm"),
      "set_humor", lambda m: {"change": "down"}),
     (_whole(rf"(?:turn|bring|dial|crank|kick|take) {_HUMOR} up{_BIT}|(?:turn|bring|dial|crank|kick) up "
             rf"{_HUMOR}{_BIT}|(?:raise|increase|boost) {_HUMOR}{_BIT}|humou?r up"

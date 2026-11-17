@@ -242,7 +242,7 @@ class OpenWebsiteTests(WebCase):
         self.startfile.assert_not_called()
 
     def test_opens_in_the_default_browser(self):
-        self.assertEqual(web.open_website("youtube"), "Opened youtube.com.")
+        self.assertEqual(web.open_website("youtube"), "Opened youtube.com in a new tab.")
         self.assertEqual(self.opened(), ["https://www.youtube.com"])
         self.urlopen.assert_not_called()
 
@@ -304,14 +304,15 @@ class OpenAgainTests(unittest.TestCase):
     def test_opens_it_when_no_window_shows_it(self):
         from aj.tools import apps, web
         with mock.patch.object(apps, "list_windows", return_value=self.windows("Why YouTube is bad - Reddit - Google Chrome")),                 mock.patch.object(web, "_open_in_browser") as browser:
-            self.assertEqual(web.open_website("youtube"), "Opened youtube.com.")
+            self.assertEqual(web.open_website("youtube"), "Opened youtube.com in a new tab.")
         browser.assert_called_once_with("https://www.youtube.com")
 
-    def test_an_address_always_opens(self):
+    def test_an_address_with_no_tab_open_opens(self):
+        """Since 2026-11-18 an address may go to its open tab first; with none, it opens."""
         from aj.tools import apps, web
-        with mock.patch.object(apps, "list_windows") as windows, mock.patch.object(web, "_open_in_browser"):
-            web.open_website("example.com")
-        windows.assert_not_called()
+        with mock.patch.object(apps, "list_windows", return_value=[]),                 mock.patch.object(web, "_open_in_browser") as browser:
+            self.assertEqual(web.open_website("example.com"), "Opened example.com in a new tab.")
+        browser.assert_called_once_with("https://example.com")
 
 if __name__ == "__main__":
     unittest.main()

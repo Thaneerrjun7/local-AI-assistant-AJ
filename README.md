@@ -30,7 +30,7 @@ It talks in the manner of JARVIS from the Iron Man films: composed, polite and d
 - **Long-term memory** in SQLite + FTS5, recalled in ~0.5 ms per turn and learned in the background only when idle.
 - **Grounding guardrail:** a sentence that states facts about the user or device that nobody told the model is dropped before it's spoken.
 - **A CPU voice:** Piper, with no graphics memory used and ready in under 2 s. Chatterbox Turbo voice cloning stays available for a bigger GPU.
-- **1,053 automated tests.**
+- **1,099 automated tests**, plus live checks of every tool and of the model's tool use on the real laptop ([docs/TESTING.md](docs/TESTING.md)).
 
 ## How it works
 
@@ -91,7 +91,7 @@ The thinker loads on demand in 1.6 s.
 
 **Speech:**
 - Parakeet int8 on the CPU transcribes 1–3 s utterances in 118–243 ms.
-- Piper (the default voice, a northern English male picked by ear) runs on the CPU and is ready in under 2 s.
+- Piper (the default voice: "Obadiah", a British male picked by ear from 17, and the steadiest of them from one spoken piece to the next) runs on the CPU, starts a sentence in about 0.1 s and is ready in under 2 s.
 - Kokoro, the earlier voice, rendered a first sentence in 387 ms on the GPU (1,057 ms on the CPU). Its model was removed; the code stays.
 - Chatterbox Turbo runs at ~1.4× real time, using 5.8 of 6.1 GB of graphics memory alongside Qwen.
 - Dictation, on test sentences with names, numbers and spoken punctuation: gemini-3.5-transcribe answered in a median 1.8 s with a 13% word error rate, against 23% for Parakeet.
@@ -109,12 +109,14 @@ The thinker loads on demand in 1.6 s.
   - **files:** find, open, read, move, copy, rename, delete to the Recycle Bin, undo. Home folder only, protected folders refused.
   - **reminders and timers:** natural-language times and repeats. Stored as Task Scheduler jobs, so they fire even while AJ is off.
   - **weather:** Open-Meteo with caching and retries. Follow-ups keep the place and get direct answers ("Does it rain today?" → "No, I don't think so…").
-  - **web:** search, websites, YouTube
+  - **web:** search, websites, YouTube, and Chrome's tabs: go to the tab that has a site open, the fifth tab, a new tab, close one, list them
+  - **two commands at once:** "lower the brightness by 50% and increase the volume to 100%"
   - **WhatsApp:** "go to Appa" opens WhatsApp, waits for it to load and opens that chat. It can type your message there; it never sends it.
   - **personality:** "set humor to 45" or "turn your humor down" turns the humor dial (steps of 15, 60 by default; "stop joking" is 0)
 - **Dictation:** say "write this down" (or "type …") and the next thing you say is typed where your cursor is, in any app. Gemini (gemini-3.5-transcribe) writes it down; Parakeet stands in when Gemini can't, and AJ says so. "Make it nicer" rewrites it as polite English (gemini-3.1-flash-lite). It types only into a text box, and never presses Enter or Send: a newline is Shift+Enter, and sending is yours.
 - **AJ (Speak):** the same dictation as a small floating window of its own, with no model to load, so it is up in a moment. Click its mic or press Ctrl+Alt+S anywhere, speak, and the words are typed where your cursor was. It runs from its own desktop shortcut (`scripts\install_speak_shortcut.ps1`, `pythonw -m aj.speak`).
-- **Sleep mode:** "go to sleep" (or "go to the tray", "hide") hides AJ in the tray. Asleep, it answers only an utterance that starts with its name: "Hey AJ, open WhatsApp" wakes it and runs the command in the same breath. Two claps wake it too, and it says hello; record your own clap with `scriptsecord_clap.py` and only claps that sound like yours count. It listens for its name only while the laptop is plugged in; on battery the mic is closed. "Turn off" still turns it off.
+- **Sleep mode:** "go to sleep" (or "go to the tray", "hide") hides AJ in the tray. Asleep, it answers only an utterance that starts with its name: "Hey AJ, open WhatsApp" wakes it and runs the command in the same breath. Two claps wake it too, and it says hello; record your own clap with `scripts
+ecord_clap.py` and only claps that sound like yours count. It listens for its name only while the laptop is plugged in; on battery the mic is closed. "Turn off" still turns it off.
 - **Always-on listener (optional):** a small background process that, while the laptop is plugged in and AJ is off, starts AJ when you say "Hey AJ" or "Computer" and passes on the rest of what you said. On battery it closes the mic and unloads its models. What it hears is only checked for the name, never kept or logged. Listening costs about 0.75 GB of RAM and ~0.3% of the CPU. Install it (Startup shortcut, starts now): `powershell -ExecutionPolicy Bypass -File scripts\install_listener.ps1`; remove it with `-Remove`.
 - **Safety:**
   - permission tiers SAFE / CONFIRM / BLOCKED / LOCKED
@@ -167,7 +169,7 @@ aj/
   persona.py  system prompt and per-turn rules
   voice_server.py   Chatterbox process (runs in its own environment)
 scripts/      setup, model downloads, shortcuts, benchmarks, voice recorder
-tests/        1,053 tests
+tests/        1,099 tests
 ```
 
 ## Setup (Windows, NVIDIA GPU)
@@ -203,8 +205,12 @@ The shortcuts store absolute paths: run the install scripts again after moving t
 ## Tests
 
 ```powershell
-.venv\Scripts\python.exe -m unittest discover tests
+.venv\Scripts\python.exe -m unittest discover tests     # 1,099 unit tests, all faked
+.venv\Scripts\python.exe scripts\check_tools.py        # every tool, for real on this laptop
+.venv\Scripts\python.exe scripts\check_tool_picks.py   # does the model use its tools? (real model)
 ```
+
+Results of the last live run are in [docs/TESTING.md](docs/TESTING.md).
 
 ## Status
 

@@ -18,15 +18,25 @@ _OPS: dict[type, Callable] = {ast.Add: operator.add, ast.Sub: operator.sub, ast.
                               ast.Pow: operator.pow}
 _UNARY: dict[type, Callable] = {ast.UAdd: operator.pos, ast.USub: operator.neg}
 _MAX = 10 ** 30
+_PERCENT_OF = re.compile(r"(\d+(?:\.\d+)?)\s*(?:%|percent|per cent)\s+of\b", re.IGNORECASE)
 
 
 def evaluate(expression: str) -> float | int:
     """The value of a plain arithmetic expression. Raises ToolError for anything else."""
     text = expression.replace("×", "*").replace("÷", "/").replace("^", "**").replace(",", "")
+    # "18% of 87.60" (found by scripts/check_tools.py, 2026-11-18: the tool refused it, though the
+    # prompt tells the model to send every percentage here): "% of" is a share, not modulo.
+    text = _PERCENT_OF.sub(r"(\1/100)*", text)
     try:
         tree = ast.parse(text, mode="eval")
     except SyntaxError:
-        raise ToolError(f"I can't work out '{expression}': it isn't a sum I can read.") from None
+        spoken = spoken_sum(text.lower())  # "17 times 23", as the model sometimes sends it
+        try:
+            tree = ast.parse(spoken, mode="eval") if spoken else None
+        except SyntaxError:
+            tree = None
+        if tree is None:
+            raise ToolError(f"I can't work out '{expression}': it isn't a sum I can read.") from None
 
     def walk(node: ast.AST) -> float | int:
         if isinstance(node, ast.Expression):

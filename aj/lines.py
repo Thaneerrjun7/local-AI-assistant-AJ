@@ -150,7 +150,8 @@ _BY_KEY = {s.key: s for s in SIGNATURES}
 # now and then "boss"), and no jokes (they play whatever the humor setting is). Every one is
 # pre-rendered, so they stay short.
 POOLS: dict[str, list[str]] = {
-    "greeting": ["Good to see you, sir. Ready when you are.",
+    "greeting": ["Hello, sir.",
+                 "Good to see you, sir. Ready when you are.",
                  "At your service, sir.",
                  "Online and listening, sir.",
                  "Hello, sir. All set.",
@@ -166,6 +167,10 @@ POOLS: dict[str, list[str]] = {
               "As you wish, sir. I'll be in the tray."],
     # Woken by two claps (core/clap.py, 2026-11-18): "AJ pops up, says hello, sir".
     "clap": ["Hello, sir.", "Hello, sir. I'm listening.", "Hello, boss. What do you need?", "Hello, sir. At your service."],
+    # Now and then after something he did for the user (the user's line, 2026-11-18).
+    "anything_else": ["Sir, will there be anything else?", "Will there be anything else, sir?"],
+    # An answer failed (core/pipeline.py, 2026-11-18): said, and the window shows Error.
+    "failed": ["Sorry, sir, something went wrong on my side.", "My apologies, sir. Something went wrong there."],
     # Hard questions: one plays at once so there's no silence while the thinker works.
     "thinking": ["Give me a moment, sir. Working it out.",
                  "One moment, sir. Running the numbers.",
@@ -202,6 +207,12 @@ _WAIT_POOL = {"get_weather": "wait_weather", "web_search": "wait_search",
 
 # After these tools, now and then, one of the user's lines that fits what just happened.
 AFTER_TOOL = {"mute": ("peace_time", 0.35), "close_app": ("peace_time", 0.2)}
+# After these, now and then, "Sir, will there be anything else?" (at most once every few turns).
+ANYTHING_ELSE_AFTER = {"open_app", "switch_to_app", "close_app", "open_website", "open_file", "open_folder",
+                       "play_youtube", "set_volume", "set_brightness", "media", "snap_window", "screenshot",
+                       "create_reminder", "start_timer"}
+ANYTHING_ELSE_CHANCE = 0.25
+ANYTHING_ELSE_GAP_TURNS = 4
 
 _CONTENT = re.compile(r"[a-z']{4,}")
 
@@ -232,6 +243,7 @@ class Lines:
         self.turn = 0
         self._last_signature_turn = -GAP_TURNS
         self._offered: dict[str, int] = {}
+        self._last_anything_else = -ANYTHING_ELSE_GAP_TURNS
         self._dirty = False
 
     # ----- rotation -----
@@ -309,13 +321,20 @@ class Lines:
     def after_tool(self, tool: str) -> str | None:
         key, chance = AFTER_TOOL.get(tool, (None, 0.0))
         if key is None or not self._gap_ok():
-            return None
+            return self._anything_else(tool)
         sig = _BY_KEY[key]
         if self._resting(sig) or self.rng.random() >= chance:
             return None
         self._mark(sig.key)
         self._last_signature_turn = self.turn
         return sig.text
+
+    def _anything_else(self, tool: str) -> str | None:
+        if (tool not in ANYTHING_ELSE_AFTER or self.turn - self._last_anything_else < ANYTHING_ELSE_GAP_TURNS
+                or self.rng.random() >= ANYTHING_ELSE_CHANCE):
+            return None
+        self._last_anything_else = self.turn
+        return self.pick("anything_else")
 
     # ----- storage -----
 
