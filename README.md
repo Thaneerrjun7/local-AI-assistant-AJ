@@ -1,9 +1,9 @@
-# Local AI Assistant AJ: a local, real-time voice assistant
+# AJ: a local, real-time voice assistant
 
 AJ is a voice assistant that runs **entirely on a Windows gaming laptop**. You talk; it starts answering in about a second. It's fast, it's private, and it runs on a 6 GB laptop GPU. You call it "AJ" or "Computer".
 
 **It can:**
-- control the laptop with 47 permission-gated tools
+- control the laptop with 49 permission-gated tools
 - type what you say wherever your cursor is (dictation), in the assistant or in its own small window, AJ (Speak)
 - sleep in the tray and wake when it hears its name, or when you clap twice
 - remember you between sessions
@@ -12,20 +12,20 @@ AJ is a voice assistant that runs **entirely on a Windows gaming laptop**. You t
 
 It talks in the manner of JARVIS from the Iron Man films: composed, polite and dryly witty, calling you "sir", with the answer first, exact numbers, humor at a level you set by voice, and honesty fixed at 100 percent.
 
-> **Demo:** _60-second video coming soon_
+> **See it:** [screenshots and benchmarks](https://thaneerrjun7.github.io/Arjun-Portfolio/aj.html) · [case study](https://thaneerrjun7.github.io/Arjun-Portfolio/case-aj.html)
 
 ---
 
 ## Highlights
 
-- **~1.1–1.4 s from end of speech to first sound**, with every stage local and streaming. Its cloud-API predecessor took ~2.5 s.
+- **0.83–1.37 s from end of speech to first sound**, with every stage local and streaming. Its cloud-API predecessor took ~2.5 s.
 - **137 ms median / 241 ms p95** to the LLM's first sentence, with prompt caching on llama.cpp.
 - **Two cooperating local models:**
   - Qwen3-4B answers and talks.
   - MiniCPM5-2B in thinking mode solves the hard ones: 12/12 vs 10/12 on a hard-reasoning set.
   - Gemini 3.8 Flash is the last fallback.
 - **Fits a 6 GB GPU and 16 GB of RAM** alongside everyday apps. Tuning llama.cpp cut its RAM from 2.8 GB to 0.75 GB.
-- **47 laptop tools** behind a fail-closed permission dispatcher, with audit logging.
+- **49 laptop tools** behind a fail-closed permission dispatcher, with audit logging.
 - **Dictation that never sends:** Gemini writes down what you say and AJ types it with real key presses where your cursor is. It never presses Enter or Send.
 - **Long-term memory** in SQLite + FTS5, recalled in ~0.5 ms per turn and learned in the background only when idle.
 - **Grounding guardrail:** a sentence that states facts about the user or device that nobody told the model is dropped before it's spoken.
@@ -46,7 +46,7 @@ flowchart LR
     Hold --> Thinker[MiniCPM5-2B<br/>thinking mode]
     Thinker -. "slow or failed" .-> Gemini[Gemini 3.8 Flash]
     Router -- "conversation" --> Qwen[Qwen3-4B on llama.cpp<br/>streams tokens, calls tools]
-    Fast --> Tools[(47 tools<br/>permission tiers)]
+    Fast --> Tools[(49 tools<br/>permission tiers)]
     Dict --> Tools
     Qwen <--> Tools
     Thinker --> Qwen
@@ -102,7 +102,7 @@ The thinker loads on demand in 1.6 s.
   - VAD endpointing that waits longer when you trail off on "and…" or "um…"
   - talk over it through the laptop speakers and it stops and listens: its own echo is told apart from your voice
   - per-stage latency shown for every turn
-- **Laptop control (47 tools):**
+- **Laptop control (49 tools):**
   - **apps:** open, switch, close, from a pre-built Start Menu / Store index
   - **system:** volume, mute, brightness, media keys, window snapping, screenshots, battery, time, a live laptop status
   - **power:** lock at once; sleep, restart, shut down and sign out only after a Yes in the window, with a countdown you can cancel
@@ -115,8 +115,7 @@ The thinker loads on demand in 1.6 s.
   - **personality:** "set humor to 45" or "turn your humor down" turns the humor dial (steps of 15, 60 by default; "stop joking" is 0)
 - **Dictation:** say "write this down" (or "type …") and the next thing you say is typed where your cursor is, in any app. Gemini (gemini-3.5-transcribe) writes it down; Parakeet stands in when Gemini can't, and AJ says so. "Make it nicer" rewrites it as polite English (gemini-3.1-flash-lite). It types only into a text box, and never presses Enter or Send: a newline is Shift+Enter, and sending is yours.
 - **AJ (Speak):** the same dictation as a small floating window of its own, with no model to load, so it is up in a moment. Click its mic or press Ctrl+Alt+S anywhere, speak, and the words are typed where your cursor was. It runs from its own desktop shortcut (`scripts\install_speak_shortcut.ps1`, `pythonw -m aj.speak`).
-- **Sleep mode:** "go to sleep" (or "go to the tray", "hide") hides AJ in the tray. Asleep, it answers only an utterance that starts with its name: "Hey AJ, open WhatsApp" wakes it and runs the command in the same breath. Two claps wake it too, and it says hello; record your own clap with `scripts
-ecord_clap.py` and only claps that sound like yours count. It listens for its name only while the laptop is plugged in; on battery the mic is closed. "Turn off" still turns it off.
+- **Sleep mode:** "go to sleep" (or "go to the tray", "hide") hides AJ in the tray. Asleep, it answers only an utterance that starts with its name: "Hey AJ, open WhatsApp" wakes it and runs the command in the same breath. Two claps wake it too, and it says hello; record your own clap with `scripts\record_clap.py` and only claps that sound like yours count. It listens for its name only while the laptop is plugged in; on battery the mic is closed. "Turn off" still turns it off.
 - **Always-on listener (optional):** a small background process that, while the laptop is plugged in and AJ is off, starts AJ when you say "Hey AJ" or "Computer" and passes on the rest of what you said. On battery it closes the mic and unloads its models. What it hears is only checked for the name, never kept or logged. Listening costs about 0.75 GB of RAM and ~0.3% of the CPU. Install it (Startup shortcut, starts now): `powershell -ExecutionPolicy Bypass -File scripts\install_listener.ps1`; remove it with `-Remove`.
 - **Safety:**
   - permission tiers SAFE / CONFIRM / BLOCKED / LOCKED
@@ -160,7 +159,7 @@ ecord_clap.py` and only claps that sound like yours count. It listens for its na
 aj/
   core/       voice pipeline, LLM client, routing (brain), delivery guard, TTS/STT, dictation,
               wake words and sleep mode, process control
-  tools/      tool registry, fail-closed dispatcher, intents, 47 tools in 13 modules
+  tools/      tool registry, fail-closed dispatcher, intents, 49 tools in 13 modules
   memory/     SQLite/FTS5 memory, fact extraction, recall, backup
   ui/         PyQt6 window and tray
   speak/      AJ (Speak), the standalone speech-to-text window
@@ -229,7 +228,7 @@ Results of the last live run are in [docs/TESTING.md](docs/TESTING.md).
 
 ## Credits and licence
 
-- **Author:** designed and built by [Thaneerrjun7](https://github.com/Thaneerrjun7). I designed the architecture, picked every model from benchmark data and blind listening tests, and tested it live on my own laptop. AI coding tools helped along the way.
+- **Author:** designed and built by **Arjun Shanker** ([@Thaneerrjun7](https://github.com/Thaneerrjun7)). I designed the architecture, picked every model from benchmark data and blind listening tests, and tested it live on my own laptop. AI coding tools helped along the way.
 - **Licence:** the code is MIT-licensed (see `LICENSE`).
 
 ## Models and licences
